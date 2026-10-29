@@ -99,7 +99,10 @@ function loadNat(xml: string) {
   for (const country of descendants(root, "G_COUNTRY_CODE")) {
     const name = firstText(country, "COUNTRY_NAME").trim();
     const code = firstText(country, "COUNTRY_CODE").trim();
-    const value = descendants(country, "VALUE").reduce((sum, v) => sum + number(textValue(v)), 0);
+    const value = descendants(country, "VALUE").reduce<number>(
+      (sum, v) => sum + number(textValue(v)),
+      0
+    );
     const cat = ALIASES[norm(name)] ?? "other";
     bycat[cat] = (bycat[cat] ?? 0) + value;
     totalSum += value;
