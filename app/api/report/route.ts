@@ -91,7 +91,7 @@ function parseXml(xml: string, filename: string): XmlValue {
   }
 }
 
-function loadNat(xml: string) {
+function loadNat(xml: string, exclusions: { code: string; count: number }[] = []) {
   const root = parseXml(xml, "nat.xml");
   const bycat: Record<string, number> = {};
   const countryRows: [string, string, number, string][] = [];
@@ -112,6 +112,30 @@ function loadNat(xml: string) {
   const totalText = textValue(totalNode);
   const total = totalText.trim() ? number(totalText) : totalSum;
   if (!countryRows.length) throw new Error("لم يتم العثور على بيانات G_COUNTRY_CODE في nat.xml. تحقق من الملف.");
+  const requested = new Map<string, number>();
+  for (const item of exclusions) {
+    const code = String(item.code ?? "").trim().toUpperCase();
+    const count = Number(item.count);
+    if (!/^[A-Z]{2,3}$/.test(code) || !Number.isInteger(count) || count < 1) {
+      throw new Error("بيانات الاستثناء غير صحيحة. اختر كود جنسية صحيحًا وعددًا صحيحًا أكبر من صفر.");
+    }
+    requested.set(code, (requested.get(code) ?? 0) + count);
+  }
+  for (const [code, count] of requested) {
+    const matching = countryRows.filter((row) => row[1].trim().toUpperCase() === code);
+    const available = matching.reduce((sum, row) => sum + row[2], 0);
+    if (!matching.length) throw new Error("كود الجنسية " + code + " غير موجود في ملف nat.xml.");
+    if (count > available) throw new Error("عدد الاستثناء المطلوب للجنسية " + code + " هو " + count + "، بينما العدد الموجود في الملف " + available + " فقط.");
+    let remaining = count;
+    for (const row of matching) {
+      const deduction = Math.min(row[2], remaining);
+      row[2] -= deduction;
+      remaining -= deduction;
+      bycat[row[3]] = Math.max(0, (bycat[row[3]] ?? 0) - deduction);
+      total -= deduction;
+      if (remaining === 0) break;
+    }
+  }
   return { bycat, total, countryRows };
 }
 
@@ -145,6 +169,17 @@ export async function POST(request: Request) {
     const form = await request.formData();
     const nat = form.get("nat");
     const man = form.get("man");
+    let exclusions: { code: string; count: number }[] = [];
+    const exclusionsRaw = form.get("exclusions");
+    if (typeof exclusionsRaw === "string" && exclusionsRaw.trim()) {
+      try {
+        const parsed = JSON.parse(exclusionsRaw);
+        if (!Array.isArray(parsed)) throw new Error();
+        exclusions = parsed.map((item) => ({ code: String(item?.code ?? ""), count: Number(item?.count) }));
+      } catch {
+        return NextResponse.json({ error: "صيغة بيانات الاستثناءات غير صحيحة." }, { status: 400 });
+      }
+    }
     if (!(nat instanceof File) || !(man instanceof File)) {
       return NextResponse.json({ error: "يجب رفع الملفين nat.xml وman.xml." }, { status: 400 });
     }
@@ -152,7 +187,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "حجم كل ملف يجب ألا يتجاوز 20 ميجابايت." }, { status: 413 });
     }
     const [natXml, manXml] = await Promise.all([nat.text(), man.text()]);
-    const { bycat, total, countryRows } = loadNat(natXml);
+    const { bycat, total, countryRows } = loadNat(natXml, exclusions);
     const { values: manValues } = loadMan(manXml);
     const egyptians = bycat.egyptian ?? 0;
     const arabs = [...ARAB].reduce((sum, key) => sum + (bycat[key] ?? 0), 0);
@@ -202,7 +237,7 @@ export async function POST(request: Request) {
       }
     }
     const audit = workbook.addWorksheet("تفاصيل الجنسيات", { views: [{ rightToLeft: true, state: "frozen", ySplit: 1 }] });
-    audit.addRow(["اسم الجنسية في XML", "كود الدولة", "القيمة", "التصنيف"]);
+    audit.addRow(["اسم الجنسية في XML", "كود الدولة", "القيمة بعد الاستثناء", "التصنيف"]);
     for (const row of [...countryRows].sort((a, b) => a[0].toLowerCase().localeCompare(b[0].toLowerCase()))) audit.addRow(row);
     audit.columns = [{ width: 32 }, { width: 16 }, { width: 14 }, { width: 22 }];
     audit.getRow(1).eachCell((cell) => {
