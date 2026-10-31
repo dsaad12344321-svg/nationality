@@ -22,13 +22,13 @@ const ALIASES: Record<string, string> = {
   "great britain": "british", "united kingdom": "british", uk: "british", england: "british", britain: "british",
   germany: "german", ukraine: "ukrainian", russia: "russian", belgium: "belgian", poland: "polish",
   china: "chinese", "people's republic of china": "chinese", france: "french", italy: "italian", india: "indian",
-  japan: "japanese", croatia: "croatian", pakistan: "pakistani", spain: "spanish", iran: "iranian",
+  japan: "japanese", croatia: "croatian", pakistan: "pakistani", spain: "spanish", espana: "spanish", "españa": "spanish", "kingdom of spain": "spanish", spanish: "spanish", iran: "iranian",
   "islamic republic of iran": "iranian", israel: "israeli", "state of israel": "israeli",
   "saudi arabia": "saudi", iraq: "iraqi", libya: "libyan", sudan: "sudanese", palestine: "palestinian",
   "state of palestine": "palestinian", jordan: "jordanian", morocco: "moroccan", algeria: "algerian",
   tunisia: "tunisian", mauritania: "mauritanian", bahrain: "bahraini", lebanon: "lebanese", lebanese: "lebanese",
   "united arab emirates": "arab", uae: "arab", kuwait: "arab", qatar: "arab", oman: "arab",
-  yemen: "arab", syria: "arab", lebanon: "arab", comoros: "arab", somalia: "arab", djibouti: "arab",
+  yemen: "arab", syria: "arab", comoros: "arab", somalia: "arab", djibouti: "arab",
   "arab israeli": "arab_israeli", "israeli arab": "arab_israeli", "arab-israeli": "arab_israeli",
 };
 
@@ -103,7 +103,9 @@ function loadNat(xml: string, exclusions: { code: string; count: number }[] = []
       (sum, v) => sum + number(textValue(v)),
       0
     );
-    const cat = ALIASES[norm(name)] ?? "other";
+    const normalizedName = norm(name);
+    const normalizedCode = code.toUpperCase();
+    const cat = ALIASES[normalizedName] ?? (["ES", "ESP"].includes(normalizedCode) ? "spanish" : ["LB", "LBN"].includes(normalizedCode) ? "lebanese" : "other");
     bycat[cat] = (bycat[cat] ?? 0) + value;
     totalSum += value;
     countryRows.push([name || "غير معروف", code, value, cat]);
@@ -123,7 +125,7 @@ function loadNat(xml: string, exclusions: { code: string; count: number }[] = []
   }
   for (const [code, count] of requested) {
     const matching = countryRows.filter((row) =>
-      row[1].trim().toUpperCase() === code || (code === "ES" && row[3] === "spanish")
+      row[1].trim().toUpperCase() === code || (code === "ES" && ["ES", "ESP"].includes(row[1].trim().toUpperCase())) || (code === "ES" && row[3] === "spanish")
     );
     const available = matching.reduce((sum, row) => sum + row[2], 0);
     if (!matching.length) throw new Error("كود الجنسية " + code + " غير موجود في ملف nat.xml.");
