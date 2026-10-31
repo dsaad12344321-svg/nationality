@@ -146,8 +146,8 @@ function loadNat(xml: string, exclusions: { code: string; count: number }[] = []
 function loadMan(xml: string) {
   const root = parseXml(xml, "man.xml");
   const wanted: Record<string, string> = {
-    OCC_MINUS_COMP_HU: "النسبة",
-    OCC_PERC_WO_CH: "الغرف المشغولة",
+    OCC_PERC_WO_CH: "النسبة",
+    OCC_MINUS_COMP_HU: "الغرف المشغولة",
     ARRIVAL_ROOMS: "عدد غرف الوصول",
   };
   const values: Record<string, number> = {};
@@ -199,8 +199,8 @@ export async function POST(request: Request) {
     const detailSum = DETAILS.reduce((sum, [, key]) => sum + (bycat[key] ?? 0), 0);
     const multi = foreigners - detailSum;
     const rows: [string, number | string][] = [
-      ["النسبة", manValues.OCC_MINUS_COMP_HU ?? 0],
-      ["الغرف المشغولة", manValues.OCC_PERC_WO_CH ?? 0],
+      ["النسبة", manValues.OCC_PERC_WO_CH ?? 0],
+      ["الغرف المشغولة", manValues.OCC_MINUS_COMP_HU ?? 0],
       ["المصريون", egyptians], ["العرب", arabs], ["الأجانب", foreigners], ["", ""],
       ...DETAILS.map(([label, key]) => [label, bycat[key] ?? 0] as [string, number]),
       ["", ""], ["متعدد الوصول", multi], ["عدد غرف الوصول", manValues.ARRIVAL_ROOMS ?? 0],
