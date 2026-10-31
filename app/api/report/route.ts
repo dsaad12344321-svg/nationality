@@ -122,7 +122,9 @@ function loadNat(xml: string, exclusions: { code: string; count: number }[] = []
     requested.set(code, (requested.get(code) ?? 0) + count);
   }
   for (const [code, count] of requested) {
-    const matching = countryRows.filter((row) => row[1].trim().toUpperCase() === code);
+    const matching = countryRows.filter((row) =>
+      row[1].trim().toUpperCase() === code || (code === "ES" && row[3] === "spanish")
+    );
     const available = matching.reduce((sum, row) => sum + row[2], 0);
     if (!matching.length) throw new Error("كود الجنسية " + code + " غير موجود في ملف nat.xml.");
     if (count > available) throw new Error("عدد الاستثناء المطلوب للجنسية " + code + " هو " + count + "، بينما العدد الموجود في الملف " + available + " فقط.");
