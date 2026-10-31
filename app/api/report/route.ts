@@ -26,7 +26,7 @@ const ALIASES: Record<string, string> = {
   "islamic republic of iran": "iranian", israel: "israeli", "state of israel": "israeli",
   "saudi arabia": "saudi", iraq: "iraqi", libya: "libyan", sudan: "sudanese", palestine: "palestinian",
   "state of palestine": "palestinian", jordan: "jordanian", morocco: "moroccan", algeria: "algerian",
-  tunisia: "tunisian", mauritania: "mauritanian", bahrain: "bahraini",
+  tunisia: "tunisian", mauritania: "mauritanian", bahrain: "bahraini", lebanon: "lebanese", lebanese: "lebanese",
   "united arab emirates": "arab", uae: "arab", kuwait: "arab", qatar: "arab", oman: "arab",
   yemen: "arab", syria: "arab", lebanon: "arab", comoros: "arab", somalia: "arab", djibouti: "arab",
   "arab israeli": "arab_israeli", "israeli arab": "arab_israeli", "arab-israeli": "arab_israeli",
@@ -38,11 +38,11 @@ const DETAILS: [string, string][] = [
   ["فرنسي", "french"], ["إيطالي", "italian"], ["هندي", "indian"], ["ياباني", "japanese"],
   ["كرواتي", "croatian"], ["باكستاني", "pakistani"], ["إسباني", "spanish"], ["إيراني", "iranian"],
   ["إسرائيلي", "israeli"], ["عرب إسرائيلي", "arab_israeli"], ["سعودي", "saudi"], ["عراقي", "iraqi"],
-  ["ليبي", "libyan"], ["سوداني", "sudanese"], ["فلسطيني", "palestinian"], ["أردني", "jordanian"],
+  ["ليبي", "libyan"], ["لبناني", "lebanese"], ["سوداني", "sudanese"], ["فلسطيني", "palestinian"], ["أردني", "jordanian"],
   ["المغرب", "moroccan"], ["الجزائر", "algerian"], ["تونس", "tunisian"], ["موريتانيا", "mauritanian"],
   ["بحريني", "bahraini"],
 ];
-const ARAB = new Set(["saudi", "iraqi", "libyan", "sudanese", "palestinian", "jordanian", "moroccan", "algerian", "tunisian", "mauritanian", "bahraini", "arab"]);
+const ARAB = new Set(["saudi", "iraqi", "libyan", "lebanese", "sudanese", "palestinian", "jordanian", "moroccan", "algerian", "tunisian", "mauritanian", "bahraini", "arab"]);
 
 function norm(value: unknown): string {
   return String(value ?? "").trim().toLowerCase().replace(/_/g, " ").split(/\s+/).filter(Boolean).join(" ");
