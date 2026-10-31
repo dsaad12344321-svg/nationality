@@ -112,7 +112,7 @@ function loadNat(xml: string, exclusions: { code: string; count: number }[] = []
   }
   const totalNode = descendants(root, "SUMVALUEPERVALUE_CODE")[0];
   const totalText = textValue(totalNode);
-  const total = totalText.trim() ? number(totalText) : totalSum;
+  let total = totalText.trim() ? number(totalText) : totalSum;
   if (!countryRows.length) throw new Error("لم يتم العثور على بيانات G_COUNTRY_CODE في nat.xml. تحقق من الملف.");
   const requested = new Map<string, number>();
   for (const item of exclusions) {
