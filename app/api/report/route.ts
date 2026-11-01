@@ -28,7 +28,7 @@ const ALIASES: Record<string, string> = {
   "state of palestine": "palestinian", jordan: "jordanian", morocco: "moroccan", algeria: "algerian",
   tunisia: "tunisian", mauritania: "mauritanian", bahrain: "bahraini", lebanon: "lebanese", lebanese: "lebanese",
   "united arab emirates": "arab", uae: "arab", kuwait: "arab", qatar: "arab", oman: "arab",
-  yemen: "arab", syria: "arab", comoros: "arab", somalia: "arab", djibouti: "arab",
+  yemen: "arab", syria: "arab", comoros: "arab",
   "arab israeli": "arab_israeli", "israeli arab": "arab_israeli", "arab-israeli": "arab_israeli",
 };
 
