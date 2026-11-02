@@ -3,13 +3,16 @@
 import { useEffect, useState } from "react";
 
 type Exclusion = { id: number; code: string; count: number };
+type ArrivalRecord = { id: number; code: string; count: number; arrivalDate: string; departureDate: string };
 const STORAGE_KEY = "nationality-report-exclusions-v1";
+const ARRIVAL_STORAGE_KEY = "nationality-report-arrivals-v1";
 const COUNTRIES = [["ES","إسبانيا"],["DE","ألمانيا"],["GB","بريطانيا"],["US","الولايات المتحدة"],["UA","أوكرانيا"],["RU","روسيا"],["BE","بلجيكا"],["PL","بولندا"],["CN","الصين"],["FR","فرنسا"],["IT","إيطاليا"],["IN","الهند"],["JP","اليابان"],["HR","كرواتيا"],["PK","باكستان"],["IR","إيران"],["IL","إسرائيل"],["SA","السعودية"],["IQ","العراق"],["LY","ليبيا"],["SD","السودان"],["PS","فلسطين"],["JO","الأردن"],["MA","المغرب"],["DZ","الجزائر"],["TN","تونس"],["MR","موريتانيا"],["BH","البحرين"],["EG","مصر"],["AE","الإمارات"],["KW","الكويت"],["QA","قطر"],["OM","عُمان"],["YE","اليمن"],["SY","سوريا"],["LB","لبنان"],["NL","هولندا"],["AT","النمسا"],["CH","سويسرا"],["SE","السويد"],["NO","النرويج"],["DK","الدنمارك"],["FI","فنلندا"],["CZ","التشيك"],["SK","سلوفاكيا"],["HU","المجر"],["RO","رومانيا"],["BG","بلغاريا"],["GR","اليونان"],["TR","تركيا"],["CA","كندا"],["AU","أستراليا"],["BR","البرازيل"],["MX","المكسيك"],["ZA","جنوب أفريقيا"]] as const;
 
 export default function Home() {
   const [natFile, setNatFile] = useState<File | null>(null);
   const [manFile, setManFile] = useState<File | null>(null);
   const [exclusions, setExclusions] = useState<Exclusion[]>([]);
+  const [arrivalRecords, setArrivalRecords] = useState<ArrivalRecord[]>([]);
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -27,6 +30,19 @@ export default function Home() {
         })));
       }
     } catch { /* تجاهل الإعدادات المحفوظة غير الصالحة */ }
+    try {
+      const savedArrivals = localStorage.getItem(ARRIVAL_STORAGE_KEY);
+      if (savedArrivals) {
+        const parsedArrivals = JSON.parse(savedArrivals);
+        if (Array.isArray(parsedArrivals)) setArrivalRecords(parsedArrivals.map((item, index) => ({
+          id: Number(item.id) || Date.now() + index,
+          code: String(item.code || "ES").toUpperCase(),
+          count: Math.max(1, Math.floor(Number(item.count) || 1)),
+          arrivalDate: String(item.arrivalDate || ""),
+          departureDate: String(item.departureDate || ""),
+        })));
+      }
+    } catch { /* تجاهل سجلات الوصول غير الصالحة */ }
     setReady(true);
   }, []);
 
@@ -34,8 +50,16 @@ export default function Home() {
     if (ready) localStorage.setItem(STORAGE_KEY, JSON.stringify(exclusions));
   }, [exclusions, ready]);
 
+  useEffect(() => {
+    if (ready) localStorage.setItem(ARRIVAL_STORAGE_KEY, JSON.stringify(arrivalRecords));
+  }, [arrivalRecords, ready]);
+
   function addExclusion() {
     setExclusions((items) => [...items, { id: Date.now(), code: "ES", count: 1 }]);
+  }
+
+  function addArrivalRecord() {
+    setArrivalRecords((items) => [...items, { id: Date.now(), code: "ES", count: 1, arrivalDate: "", departureDate: "" }]);
   }
 
   async function generateReport() {
@@ -134,7 +158,34 @@ export default function Home() {
       </section>
 
       <section className="panel">
-        <h2>3. محتويات التقرير</h2>
+        <h2>3. تسجيل الجنسيات ومواعيد الوصول والمغادرة</h2>
+        <p className="muted">سجّل عدد الأشخاص من كل جنسية مع تاريخ الوصول وتاريخ المغادرة. هذه السجلات تُحفظ تلقائيًا في هذا المتصفح ولا تغيّر حسابات تقرير Excel أو الاستثناءات.</p>
+        {arrivalRecords.length === 0 && <p className="empty-exclusions">لا توجد سجلات مضافة حتى الآن.</p>}
+        {arrivalRecords.map((item) => (
+          <div className="arrival-row" key={item.id}>
+            <label>الجنسية
+              <select value={item.code} onChange={(e) => setArrivalRecords((items) => items.map((x) => x.id === item.id ? { ...x, code: e.target.value } : x))}>
+                {COUNTRIES.map(([code, name]) => <option key={code} value={code}>{name} ({code})</option>)}
+              </select>
+            </label>
+            <label>العدد
+              <input type="number" min="1" step="1" value={item.count} onChange={(e) => setArrivalRecords((items) => items.map((x) => x.id === item.id ? { ...x, count: Number(e.target.value) } : x))} />
+            </label>
+            <label>تاريخ الوصول
+              <input type="date" value={item.arrivalDate} onChange={(e) => setArrivalRecords((items) => items.map((x) => x.id === item.id ? { ...x, arrivalDate: e.target.value } : x))} />
+            </label>
+            <label>تاريخ المغادرة
+              <input type="date" min={item.arrivalDate || undefined} value={item.departureDate} onChange={(e) => setArrivalRecords((items) => items.map((x) => x.id === item.id ? { ...x, departureDate: e.target.value } : x))} />
+            </label>
+            <button type="button" className="remove-button" onClick={() => setArrivalRecords((items) => items.filter((x) => x.id !== item.id))}>حذف</button>
+          </div>
+        ))}
+        <button type="button" className="add-button" onClick={addArrivalRecord}>＋ إضافة سجل وصول</button>
+        <p className="saved-hint">يتم حفظ هذه السجلات تلقائيًا على هذا المتصفح، وستظل موجودة عند فتح الموقع مرة أخرى.</p>
+      </section>
+
+      <section className="panel">
+        <h2>4. محتويات التقرير</h2>
         <ul className="steps">
           <li>النسبة والغرف المشغولة والمصريون والعرب والأجانب.</li>
           <li>تفاصيل الجنسيات المحددة حسب التصنيفات الموجودة في الكود الأصلي.</li>
