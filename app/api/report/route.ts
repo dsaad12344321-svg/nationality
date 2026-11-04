@@ -43,6 +43,9 @@ const DETAILS: [string, string][] = [
   ["بحريني", "bahraini"],
 ];
 const ARAB = new Set(["saudi", "iraqi", "libyan", "lebanese", "sudanese", "palestinian", "jordanian", "moroccan", "algerian", "tunisian", "mauritanian", "bahraini", "arab"]);
+const CODE_CATEGORIES: Record<string, string> = {
+  EG: "egyptian", US: "american", GB: "british", DE: "german", UA: "ukrainian", RU: "russian", BE: "belgian", PL: "polish", CN: "chinese", FR: "french", IT: "italian", IN: "indian", JP: "japanese", HR: "croatian", PK: "pakistani", ES: "spanish", IR: "iranian", IL: "israeli", SA: "saudi", IQ: "iraqi", LY: "libyan", LB: "lebanese", SD: "sudanese", PS: "palestinian", JO: "jordanian", MA: "moroccan", DZ: "algerian", TN: "tunisian", MR: "mauritanian", BH: "bahraini", AE: "arab", KW: "arab", QA: "arab", OM: "arab", YE: "arab", SY: "arab", NL: "other", AT: "other", CH: "other", SE: "other", NO: "other", DK: "other", FI: "other", CZ: "other", SK: "other", HU: "other", RO: "other", BG: "other", GR: "other", TR: "other", CA: "other", AU: "other", BR: "other", MX: "other", ZA: "other", BH: "bahraini", KW: "arab", QA: "arab", OM: "arab", YE: "arab", SY: "arab"
+};
 
 function norm(value: unknown): string {
   return String(value ?? "").trim().toLowerCase().replace(/_/g, " ").split(/\s+/).filter(Boolean).join(" ");
@@ -91,7 +94,7 @@ function parseXml(xml: string, filename: string): XmlValue {
   }
 }
 
-function loadNat(xml: string, exclusions: { code: string; count: number }[] = []) {
+function loadNat(xml: string, exclusions: { code: string; count: number }[] = [], additions: { code: string; count: number }[] = []) {
   const root = parseXml(xml, "nat.xml");
   const bycat: Record<string, number> = {};
   const countryRows: [string, string, number, string][] = [];
@@ -140,6 +143,21 @@ function loadNat(xml: string, exclusions: { code: string; count: number }[] = []
       if (remaining === 0) break;
     }
   }
+  const manualTotals = new Map<string, number>();
+  for (const item of additions) {
+    const code = String(item.code ?? "").trim().toUpperCase();
+    const count = Number(item.count);
+    if (!/^[A-Z]{2,3}$/.test(code) || !Number.isInteger(count) || count < 1) {
+      throw new Error("بيانات الإضافة اليدوية غير صحيحة. اختر كود جنسية صحيحًا وعددًا صحيحًا أكبر من صفر.");
+    }
+    manualTotals.set(code, (manualTotals.get(code) ?? 0) + count);
+  }
+  for (const [code, count] of manualTotals) {
+    const category = CODE_CATEGORIES[code] ?? "other";
+    bycat[category] = (bycat[category] ?? 0) + count;
+    total += count;
+    countryRows.push(["إضافة يدوية", code, count, category]);
+  }
   return { bycat, total, countryRows };
 }
 
@@ -174,6 +192,7 @@ export async function POST(request: Request) {
     const nat = form.get("nat");
     const man = form.get("man");
     let exclusions: { code: string; count: number }[] = [];
+    let additions: { code: string; count: number }[] = [];
     const exclusionsRaw = form.get("exclusions");
     if (typeof exclusionsRaw === "string" && exclusionsRaw.trim()) {
       try {
@@ -184,6 +203,16 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "صيغة بيانات الاستثناءات غير صحيحة." }, { status: 400 });
       }
     }
+    const additionsRaw = form.get("additions");
+    if (typeof additionsRaw === "string" && additionsRaw.trim()) {
+      try {
+        const parsed = JSON.parse(additionsRaw);
+        if (!Array.isArray(parsed)) throw new Error();
+        additions = parsed.map((item) => ({ code: String(item?.code ?? ""), count: Number(item?.count) }));
+      } catch {
+        return NextResponse.json({ error: "صيغة بيانات الإضافات اليدوية غير صحيحة." }, { status: 400 });
+      }
+    }
     if (!(nat instanceof File) || !(man instanceof File)) {
       return NextResponse.json({ error: "يجب رفع الملفين nat.xml وman.xml." }, { status: 400 });
     }
@@ -191,7 +220,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "حجم كل ملف يجب ألا يتجاوز 20 ميجابايت." }, { status: 413 });
     }
     const [natXml, manXml] = await Promise.all([nat.text(), man.text()]);
-    const { bycat, total, countryRows } = loadNat(natXml, exclusions);
+    const { bycat, total, countryRows } = loadNat(natXml, exclusions, additions);
     const { values: manValues } = loadMan(manXml);
     const egyptians = bycat.egyptian ?? 0;
     const arabs = [...ARAB].reduce((sum, key) => sum + (bycat[key] ?? 0), 0);
