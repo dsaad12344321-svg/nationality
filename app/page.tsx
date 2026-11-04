@@ -4,8 +4,10 @@ import { useEffect, useState } from "react";
 
 type Exclusion = { id: number; code: string; count: number };
 type ArrivalRecord = { id: number; code: string; count: number; arrivalDate: string; departureDate: string };
+type ManualAddition = { id: number; code: string; count: number };
 const STORAGE_KEY = "nationality-report-exclusions-v1";
 const ARRIVAL_STORAGE_KEY = "nationality-report-arrivals-v1";
+const ADDITION_STORAGE_KEY = "nationality-report-additions-v1";
 const COUNTRIES = [["ES","إسبانيا"],["DE","ألمانيا"],["GB","بريطانيا"],["US","الولايات المتحدة"],["UA","أوكرانيا"],["RU","روسيا"],["BE","بلجيكا"],["PL","بولندا"],["CN","الصين"],["FR","فرنسا"],["IT","إيطاليا"],["IN","الهند"],["JP","اليابان"],["HR","كرواتيا"],["PK","باكستان"],["IR","إيران"],["IL","إسرائيل"],["SA","السعودية"],["IQ","العراق"],["LY","ليبيا"],["SD","السودان"],["PS","فلسطين"],["JO","الأردن"],["MA","المغرب"],["DZ","الجزائر"],["TN","تونس"],["MR","موريتانيا"],["BH","البحرين"],["EG","مصر"],["AE","الإمارات"],["KW","الكويت"],["QA","قطر"],["OM","عُمان"],["YE","اليمن"],["SY","سوريا"],["LB","لبنان"],["NL","هولندا"],["AT","النمسا"],["CH","سويسرا"],["SE","السويد"],["NO","النرويج"],["DK","الدنمارك"],["FI","فنلندا"],["CZ","التشيك"],["SK","سلوفاكيا"],["HU","المجر"],["RO","رومانيا"],["BG","بلغاريا"],["GR","اليونان"],["TR","تركيا"],["CA","كندا"],["AU","أستراليا"],["BR","البرازيل"],["MX","المكسيك"],["ZA","جنوب أفريقيا"]] as const;
 
 export default function Home() {
@@ -13,6 +15,7 @@ export default function Home() {
   const [manFile, setManFile] = useState<File | null>(null);
   const [exclusions, setExclusions] = useState<Exclusion[]>([]);
   const [arrivalRecords, setArrivalRecords] = useState<ArrivalRecord[]>([]);
+  const [additions, setAdditions] = useState<ManualAddition[]>([]);
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -43,6 +46,17 @@ export default function Home() {
         })));
       }
     } catch { /* تجاهل سجلات الوصول غير الصالحة */ }
+    try {
+      const savedAdditions = localStorage.getItem(ADDITION_STORAGE_KEY);
+      if (savedAdditions) {
+        const parsedAdditions = JSON.parse(savedAdditions);
+        if (Array.isArray(parsedAdditions)) setAdditions(parsedAdditions.map((item, index) => ({
+          id: Number(item.id) || Date.now() + index,
+          code: String(item.code || "LY").toUpperCase(),
+          count: Math.max(1, Math.floor(Number(item.count) || 1)),
+        })));
+      }
+    } catch { /* تجاهل الإضافات اليدوية غير الصالحة */ }
     setReady(true);
   }, []);
 
@@ -54,8 +68,16 @@ export default function Home() {
     if (ready) localStorage.setItem(ARRIVAL_STORAGE_KEY, JSON.stringify(arrivalRecords));
   }, [arrivalRecords, ready]);
 
+  useEffect(() => {
+    if (ready) localStorage.setItem(ADDITION_STORAGE_KEY, JSON.stringify(additions));
+  }, [additions, ready]);
+
   function addExclusion() {
     setExclusions((items) => [...items, { id: Date.now(), code: "ES", count: 1 }]);
+  }
+
+  function addManualAddition() {
+    setAdditions((items) => [...items, { id: Date.now(), code: "LY", count: 1 }]);
   }
 
   function addArrivalRecord() {
@@ -78,6 +100,11 @@ export default function Home() {
       setMessage("تأكد من اختيار الجنسية وإدخال عدد صحيح أكبر من صفر لكل استثناء.");
       return;
     }
+    if (additions.some((item) => !item.code || !Number.isInteger(item.count) || item.count < 1)) {
+      setKind("error");
+      setMessage("تأكد من اختيار الجنسية وإدخال عدد صحيح أكبر من صفر لكل إضافة يدوية.");
+      return;
+    }
     setBusy(true);
     setMessage("جارٍ قراءة الملفات وإنشاء تقرير Excel...");
     setKind("info");
@@ -86,6 +113,7 @@ export default function Home() {
       data.append("nat", natFile);
       data.append("man", manFile);
       data.append("exclusions", JSON.stringify(exclusions.map(({ code, count }) => ({ code, count }))));
+      data.append("additions", JSON.stringify(additions.map(({ code, count }) => ({ code, count }))));
       const response = await fetch("/api/report", { method: "POST", body: data });
       if (!response.ok) {
         const error = await response.json().catch(() => ({ error: "حدث خطأ غير متوقع." }));
@@ -101,7 +129,7 @@ export default function Home() {
       link.remove();
       URL.revokeObjectURL(url);
       setKind("success");
-      setMessage("تم إنشاء التقرير وتنزيله بنجاح. تم تطبيق الاستثناءات المحددة.");
+      setMessage("تم إنشاء التقرير وتنزيله بنجاح، مع تطبيق الاستثناءات والإضافات اليدوية.");
     } catch (error) {
       setKind("error");
       setMessage(error instanceof Error ? error.message : "حدث خطأ أثناء إنشاء التقرير.");
@@ -185,7 +213,28 @@ export default function Home() {
       </section>
 
       <section className="panel">
-        <h2>4. محتويات التقرير</h2>
+        <h2>4. إضافة جنسيات غير موجودة في nat.xml</h2>
+        <p className="muted">استخدم هذا القسم عندما يكون لديك عدد مؤكد لجنسية غير ظاهر في ملف nat.xml. سيُضاف العدد إلى الجنسية وإجمالي التقرير، ثم تُعاد حسابات العرب والأجانب ومتعدد الوصول تلقائيًا.</p>
+        {additions.length === 0 && <p className="empty-exclusions">لا توجد إضافات يدوية حتى الآن.</p>}
+        {additions.map((item) => (
+          <div className="exclusion-row" key={item.id}>
+            <label>الجنسية
+              <select value={item.code} onChange={(e) => setAdditions((items) => items.map((x) => x.id === item.id ? { ...x, code: e.target.value } : x))}>
+                {COUNTRIES.map(([code, name]) => <option key={code} value={code}>{name} ({code})</option>)}
+              </select>
+            </label>
+            <label>العدد المراد إضافته
+              <input type="number" min="1" step="1" value={item.count} onChange={(e) => setAdditions((items) => items.map((x) => x.id === item.id ? { ...x, count: Number(e.target.value) } : x))} />
+            </label>
+            <button type="button" className="remove-button" onClick={() => setAdditions((items) => items.filter((x) => x.id !== item.id))}>حذف</button>
+          </div>
+        ))}
+        <button type="button" className="add-button" onClick={addManualAddition}>＋ إضافة جنسية / عدد</button>
+        <p className="saved-hint">تُحفظ الإضافات تلقائيًا في هذا المتصفح. ستظهر في Excel كسجلات إضافة يدوية منفصلة عن بيانات XML.</p>
+      </section>
+
+      <section className="panel">
+        <h2>5. محتويات التقرير</h2>
         <ul className="steps">
           <li>النسبة والغرف المشغولة والمصريون والعرب والأجانب.</li>
           <li>تفاصيل الجنسيات المحددة حسب التصنيفات الموجودة في الكود الأصلي.</li>
