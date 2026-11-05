@@ -251,6 +251,16 @@ export default function Home() {
         <p>حوّل ملفي nat.xml وman.xml إلى تقرير Excel منسق، يتضمن ملخص الجنسيات وبيانات الغرف وتفاصيل كل دولة.</p>
       </header>
 
+      <section className="panel tool-picker">
+        <label htmlFor="tool-select">اختر الأداة</label>
+        <select id="tool-select" value={activeTool} onChange={(e) => setActiveTool(e.target.value as "nationality" | "towels")}>
+          <option value="nationality">التقرير اليومي للجنسيات</option>
+          <option value="towels">Missing Towel Detector</option>
+        </select>
+      </section>
+
+      {activeTool === "nationality" ? (
+        <>
       <section className="panel">
         <h2>إدارة البيانات والإعدادات</h2>
         <p className="muted">صدّر الاستثناءات وسجلات الوصول والإضافات اليدوية في ملف واحد، ثم استورده على أي جهاز لاستعادة نفس القيم.</p>
