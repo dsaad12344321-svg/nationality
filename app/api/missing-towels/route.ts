@@ -25,7 +25,7 @@ function findRoomRows(node: XmlNode, rows: { room: string; towel: string }[] = [
       Object.prototype.hasOwnProperty.call(record, "C48")) {
     const room = String(record.C18 ?? "").trim();
     const towel = String(record.C48 ?? "").trim();
-    if (/^\\d+$/.test(room)) rows.push({ room, towel });
+    if (/^\d+$/.test(room)) rows.push({ room, towel });
   }
 
   for (const value of Object.values(record)) findRoomRows(value, rows);
