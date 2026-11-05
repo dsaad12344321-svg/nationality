@@ -20,6 +20,11 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [kind, setKind] = useState<"error" | "success" | "info">("info");
+  const [activeTool, setActiveTool] = useState<"nationality" | "towels">("nationality");
+  const [towelFile, setTowelFile] = useState<File | null>(null);
+  const [missingRooms, setMissingRooms] = useState<string[]>([]);
+  const [towelBusy, setTowelBusy] = useState(false);
+  const [towelMessage, setTowelMessage] = useState("");
 
   useEffect(() => {
     try {
@@ -145,6 +150,42 @@ export default function Home() {
     } catch (error) {
       setKind("error");
       setMessage(error instanceof Error ? error.message : "تعذر قراءة ملف النسخة الاحتياطية.");
+    }
+  }
+
+  async function detectMissingTowels() {
+    if (!towelFile) {
+      setTowelMessage("من فضلك اختر ملف التقرير أولاً.");
+      return;
+    }
+    if (!towelFile.name.toLowerCase().endsWith(".xml")) {
+      setTowelMessage("يجب أن يكون الملف بصيغة XML.");
+      return;
+    }
+    setTowelBusy(true);
+    setTowelMessage("جارٍ فحص التقرير...");
+    setMissingRooms([]);
+    try {
+      const data = new FormData();
+      data.append("file", towelFile);
+      const response = await fetch("/api/missing-towels", { method: "POST", body: data });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "تعذر فحص الملف.");
+      setMissingRooms(result.rooms || []);
+      setTowelMessage(`اكتمل الفحص: ${result.count} غرفة بدون Towel Card.`);
+    } catch (error) {
+      setTowelMessage(error instanceof Error ? error.message : "حدث خطأ أثناء فحص الملف.");
+    } finally {
+      setTowelBusy(false);
+    }
+  }
+
+  async function copyMissingRooms() {
+    try {
+      await navigator.clipboard.writeText(missingRooms.join(","));
+      setTowelMessage(`تم نسخ ${missingRooms.length} رقم غرفة.`);
+    } catch {
+      setTowelMessage("تعذر النسخ تلقائيًا. يمكنك تحديد النص ونسخه يدويًا.");
     }
   }
 
@@ -317,6 +358,30 @@ export default function Home() {
           <li>ورقة ثانية تحتوي على تفاصيل الدول: الاسم كما ورد في XML، كود الدولة، القيمة، والتصنيف.</li>
         </ul>
       </section>
+        </>
+      ) : (
+        <section className="panel">
+          <h2>Missing Towel Detector</h2>
+          <p className="muted">ارفع تقرير الغرف بصيغة XML. ستعرض الأداة أرقام الغرف التي تكون فيها قيمة Towel Card فارغة فقط، مع إضافة صفر في البداية للغرف المكوّنة من 3 أرقام.</p>
+          <div className="upload">
+            <label htmlFor="towel-file">ملف تقرير الغرف — XML</label>
+            <input id="towel-file" type="file" accept=".xml,text/xml,application/xml" onChange={(e) => { setTowelFile(e.target.files?.[0] ?? null); setMissingRooms([]); setTowelMessage(""); }} />
+            {towelFile && <div className="filename">تم الاختيار: {towelFile.name}</div>}
+          </div>
+          <button className="button" onClick={detectMissingTowels} disabled={towelBusy}>{towelBusy ? "جارٍ الفحص..." : "فحص الغرف بدون فوط"}</button>
+          {towelMessage && <div role="status" className="notice">{towelMessage}</div>}
+          {missingRooms.length > 0 && (
+            <div className="towel-results">
+              <div className="section-heading">
+                <h3>الغرف التي لا تحتوي على Towel Card ({missingRooms.length})</h3>
+                <button type="button" className="add-button" onClick={copyMissingRooms}>نسخ القائمة</button>
+              </div>
+              <textarea readOnly value={missingRooms.join(",")} rows={5} aria-label="أرقام الغرف بدون Towel Card" />
+              <p className="saved-hint">الناتج مفصول بفواصل، مثل: 0105,0121,0156,0159</p>
+            </div>
+          )}
+        </section>
+      )}
       <p className="foot">التقرير يُنشأ عند الطلب بصيغة Excel (.xlsx).</p>
     </main>
   );
