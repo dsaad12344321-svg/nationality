@@ -4,3 +4,11 @@
 
 .arrival-row{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(90px,.55fr) minmax(145px,.9fr) minmax(145px,.9fr) auto;align-items:end;gap:10px;padding:14px;margin:12px 0;border:1px solid #e1e8f0;border-radius:12px;background:#f9fbfd}.arrival-row label{display:grid;gap:8px;font-size:13px;font-weight:700}.arrival-row select,.arrival-row input{width:100%;min-width:0;min-height:42px;padding:9px 10px;border:1px solid #cbd6e2;border-radius:8px;background:white;color:#172b4d;font:inherit}.arrival-row input[type=date]{direction:ltr}
 @media(max-width:760px){.arrival-row{grid-template-columns:1fr 1fr}.arrival-row .remove-button{grid-column:1/-1}}
+
+.tool-picker{display:grid;grid-template-columns:1fr;gap:10px}
+.tool-picker label{font-weight:700}
+.tool-picker select{width:100%;min-height:46px;padding:10px 12px;border:1px solid #cbd6e2;border-radius:9px;background:#fff;color:#172b4d;font:inherit}
+.towel-results{margin-top:22px;padding-top:18px;border-top:1px solid #e1e8f0}
+.towel-results h3{font-size:16px;margin:0}
+.towel-results textarea{display:block;width:100%;margin-top:14px;padding:14px;border:1px solid #cbd6e2;border-radius:10px;background:#f9fbfd;color:#172b4d;font:15px/1.9 monospace;direction:ltr;text-align:left;resize:vertical}
+@media(max-width:650px){.towel-results .section-heading{display:flex;align-items:center;flex-wrap:wrap}.towel-results .section-heading .add-button{width:auto;margin-top:0}}
