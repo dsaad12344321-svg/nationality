@@ -247,8 +247,8 @@ export default function Home() {
     <main className="page">
       <header className="hero">
         <p className="eyebrow">أداة التقارير الفندقية</p>
-        <h1>التقرير اليومي للجنسيات</h1>
-        <p>حوّل ملفي nat.xml وman.xml إلى تقرير Excel منسق، يتضمن ملخص الجنسيات وبيانات الغرف وتفاصيل كل دولة.</p>
+        <h1>{activeTool === "nationality" ? "التقرير اليومي للجنسيات" : "Missing Towel Detector"}</h1>
+        <p>{activeTool === "nationality" ? "حوّل ملفي nat.xml وman.xml إلى تقرير Excel منسق، يتضمن ملخص الجنسيات وبيانات الغرف وتفاصيل كل دولة." : "ارفع تقرير الغرف لاستخراج أرقام الغرف التي لا تحتوي على Towel Card."}</p>
       </header>
 
       <section className="panel tool-picker">
