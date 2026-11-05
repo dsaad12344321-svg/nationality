@@ -22,7 +22,9 @@ export default function Home() {
   const [kind, setKind] = useState<"error" | "success" | "info">("info");
   const [activeTool, setActiveTool] = useState<"nationality" | "towels">("nationality");
   const [towelFile, setTowelFile] = useState<File | null>(null);
+  const [inhFile, setInhFile] = useState<File | null>(null);
   const [missingRooms, setMissingRooms] = useState<string[]>([]);
+  const [excludedRooms, setExcludedRooms] = useState<string[]>([]);
   const [towelBusy, setTowelBusy] = useState(false);
   const [towelMessage, setTowelMessage] = useState("");
 
@@ -154,25 +156,28 @@ export default function Home() {
   }
 
   async function detectMissingTowels() {
-    if (!towelFile) {
-      setTowelMessage("من فضلك اختر ملف التقرير أولاً.");
+    if (!towelFile || !inhFile) {
+      setTowelMessage("من فضلك اختر ملف تقرير المناشف وملف Guests INH - By Room أولاً.");
       return;
     }
-    if (!towelFile.name.toLowerCase().endsWith(".xml")) {
-      setTowelMessage("يجب أن يكون الملف بصيغة XML.");
+    if (!towelFile.name.toLowerCase().endsWith(".xml") || !inhFile.name.toLowerCase().endsWith(".xml")) {
+      setTowelMessage("يجب أن يكون الملفان بصيغة XML.");
       return;
     }
     setTowelBusy(true);
     setTowelMessage("جارٍ فحص التقرير...");
     setMissingRooms([]);
+    setExcludedRooms([]);
     try {
       const data = new FormData();
       data.append("file", towelFile);
+      data.append("inhFile", inhFile);
       const response = await fetch("/api/missing-towels", { method: "POST", body: data });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "تعذر فحص الملف.");
       setMissingRooms(result.rooms || []);
-      setTowelMessage(`اكتمل الفحص: ${result.count} غرفة بدون Towel Card.`);
+      setExcludedRooms(result.excludedRooms || []);
+      setTowelMessage(`اكتمل الفحص: ${result.count} غرفة بدون Towel Card بعد استبعاد ${result.excludedCount || 0} غرفة تابعة لـ House use.`);
     } catch (error) {
       setTowelMessage(error instanceof Error ? error.message : "حدث خطأ أثناء فحص الملف.");
     } finally {
@@ -372,14 +377,27 @@ export default function Home() {
       ) : (
         <section className="panel">
           <h2>Missing Towel Detector</h2>
-          <p className="muted">ارفع تقرير الغرف بصيغة XML. ستعرض الأداة أرقام الغرف التي تكون فيها قيمة Towel Card فارغة فقط، مع إضافة صفر في البداية للغرف المكوّنة من 3 أرقام.</p>
-          <div className="upload">
-            <label htmlFor="towel-file">ملف تقرير الغرف — XML</label>
-            <input id="towel-file" type="file" accept=".xml,text/xml,application/xml" onChange={(e) => { setTowelFile(e.target.files?.[0] ?? null); setMissingRooms([]); setTowelMessage(""); }} />
-            {towelFile && <div className="filename">تم الاختيار: {towelFile.name}</div>}
+          <p className="muted">ارفع التقريرين معًا: تقرير Towel Card لاستخراج الغرف ذات القيمة الفارغة، وتقرير Guests INH - By Room لاستبعاد الغرف التي تكون Company Name فيها مثل T- House use. تتم مطابقة أرقام الغرف تلقائيًا بصيغة 4 خانات، والفلترة لا تتأثر بحالة الأحرف.</p>
+          <div className="uploads">
+            <div className="upload">
+              <label htmlFor="towel-file">1. تقرير المناشف — tc.xml</label>
+              <input id="towel-file" type="file" accept=".xml,text/xml,application/xml" onChange={(e) => { setTowelFile(e.target.files?.[0] ?? null); setMissingRooms([]); setExcludedRooms([]); setTowelMessage(""); }} />
+              {towelFile && <div className="filename">تم الاختيار: {towelFile.name}</div>}
+            </div>
+            <div className="upload">
+              <label htmlFor="inh-file">2. تقرير الإشغال — Guests INH - By Room</label>
+              <input id="inh-file" type="file" accept=".xml,text/xml,application/xml" onChange={(e) => { setInhFile(e.target.files?.[0] ?? null); setMissingRooms([]); setExcludedRooms([]); setTowelMessage(""); }} />
+              {inhFile && <div className="filename">تم الاختيار: {inhFile.name}</div>}
+            </div>
           </div>
-          <button className="button" onClick={detectMissingTowels} disabled={towelBusy}>{towelBusy ? "جارٍ الفحص..." : "فحص الغرف بدون فوط"}</button>
+          <button className="button" onClick={detectMissingTowels} disabled={towelBusy || !towelFile || !inhFile}>{towelBusy ? "جارٍ الفحص..." : "فحص الغرف واستبعاد House use"}</button>
           {towelMessage && <div role="status" className="notice">{towelMessage}</div>}
+          {excludedRooms.length > 0 && (
+            <div className="towel-results">
+              <h3>الغرف المستبعدة بسبب Company Name = House use ({excludedRooms.length})</h3>
+              <textarea readOnly value={excludedRooms.join(",")} rows={2} aria-label="الغرف المستبعدة بسبب House use" />
+            </div>
+          )}
           {missingRooms.length > 0 && (
             <div className="towel-results">
               <div className="section-heading">
