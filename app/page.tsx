@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ChangeEvent } from "react";
 
 type Exclusion = { id: number; code: string; count: number };
 type ArrivalRecord = { id: number; code: string; count: number; arrivalDate: string; departureDate: string };
@@ -106,7 +106,7 @@ export default function Home() {
     setMessage("تم تصدير جميع الإعدادات بنجاح. احتفظ بملف JSON لاستخدامه على أي جهاز.");
   }
 
-  async function importSettings(event: React.ChangeEvent<HTMLInputElement>) {
+  async function importSettings(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
