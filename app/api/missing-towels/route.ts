@@ -32,21 +32,44 @@ function findRoomRows(node: XmlNode, rows: { room: string; towel: string }[] = [
   return rows;
 }
 
+function findCompanyRooms(node: XmlNode, rooms: Set<string>, excludedCompanies: Set<string>) {
+  if (Array.isArray(node)) {
+    for (const item of node) findCompanyRooms(item, rooms, excludedCompanies);
+    return;
+  }
+  if (!node || typeof node !== "object") return;
+
+  const record = node as Record<string, XmlNode>;
+  if (Object.prototype.hasOwnProperty.call(record, "ROOM") &&
+      Object.prototype.hasOwnProperty.call(record, "COMPANY_NAME")) {
+    const room = String(record.ROOM ?? "").trim();
+    const company = String(record.COMPANY_NAME ?? "").trim();
+    if (/^\d+$/.test(room) && /house\s*use/i.test(company)) {
+      rooms.add(room.padStart(4, "0"));
+      excludedCompanies.add(company);
+    }
+  }
+
+  for (const value of Object.values(record)) findCompanyRooms(value, rooms, excludedCompanies);
+}
+
 export async function POST(request: Request) {
   try {
     const form = await request.formData();
     const file = form.get("file");
-    if (!(file instanceof File)) {
-      return NextResponse.json({ error: "من فضلك ارفع ملف التقرير بصيغة XML." }, { status: 400 });
+    const inhFile = form.get("inhFile");
+    if (!(file instanceof File) || !(inhFile instanceof File)) {
+      return NextResponse.json({ error: "من فضلك ارفع ملف تقرير المناشف وملف Guests INH - By Room." }, { status: 400 });
     }
-    if (!file.name.toLowerCase().endsWith(".xml")) {
-      return NextResponse.json({ error: "الملف يجب أن يكون بصيغة XML." }, { status: 400 });
+    if (!file.name.toLowerCase().endsWith(".xml") || !inhFile.name.toLowerCase().endsWith(".xml")) {
+      return NextResponse.json({ error: "يجب أن يكون الملفان بصيغة XML." }, { status: 400 });
     }
-    if (file.size > 20 * 1024 * 1024) {
-      return NextResponse.json({ error: "حجم الملف يجب ألا يتجاوز 20 ميجابايت." }, { status: 413 });
+    if (file.size > 20 * 1024 * 1024 || inhFile.size > 20 * 1024 * 1024) {
+      return NextResponse.json({ error: "يجب ألا يتجاوز حجم كل ملف 20 ميجابايت." }, { status: 413 });
     }
 
     const xml = await file.text();
+    const inhXml = await inhFile.text();
     let parsed: XmlNode;
     try {
       parsed = parser.parse(xml) as XmlNode;
@@ -59,11 +82,31 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "لم يتم العثور على سجلات الغرف أو الحقلين C18 وC48 في الملف." }, { status: 400 });
     }
 
-    const rooms = [...new Set(
+    let inhParsed: XmlNode;
+    try {
+      inhParsed = parser.parse(inhXml) as XmlNode;
+    } catch {
+      return NextResponse.json({ error: "تعذر قراءة ملف Guests INH - By Room. تأكد أن الملف صالح." }, { status: 400 });
+    }
+
+    const houseUseRooms = new Set<string>();
+    const excludedCompanies = new Set<string>();
+    findCompanyRooms(inhParsed, houseUseRooms, excludedCompanies);
+
+    const missingRooms = [...new Set(
       rows.filter((row) => row.towel === "").map((row) => row.room.padStart(4, "0"))
     )].sort((a, b) => Number(a) - Number(b));
+    const excludedRooms = missingRooms.filter((room) => houseUseRooms.has(room));
+    const rooms = missingRooms.filter((room) => !houseUseRooms.has(room));
 
-    return NextResponse.json({ rooms, count: rooms.length, scannedRows: rows.length });
+    return NextResponse.json({
+      rooms,
+      count: rooms.length,
+      scannedRows: rows.length,
+      excludedCount: excludedRooms.length,
+      excludedRooms,
+      excludedCompanies: [...excludedCompanies],
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "حدث خطأ أثناء فحص ملف التقرير.";
     return NextResponse.json({ error: message }, { status: 400 });
