@@ -84,6 +84,70 @@ export default function Home() {
     setArrivalRecords((items) => [...items, { id: Date.now(), code: "ES", count: 1, arrivalDate: "", departureDate: "" }]);
   }
 
+  function exportSettings() {
+    const backup = {
+      app: "nationality-report",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      exclusions,
+      arrivalRecords,
+      additions,
+    };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `nationality-settings-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    setKind("success");
+    setMessage("تم تصدير جميع الإعدادات بنجاح. احتفظ بملف JSON لاستخدامه على أي جهاز.");
+  }
+
+  async function importSettings(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      const parsed = JSON.parse(await file.text());
+      if (!parsed || parsed.app !== "nationality-report" || parsed.version !== 1 ||
+          !Array.isArray(parsed.exclusions) || !Array.isArray(parsed.arrivalRecords) || !Array.isArray(parsed.additions)) {
+        throw new Error("ملف النسخة الاحتياطية غير صالح أو لا يتوافق مع إصدار الموقع.");
+      }
+      const normalizeCount = (value: unknown) => {
+        const count = Number(value);
+        if (!Number.isInteger(count) || count < 1) throw new Error("يوجد عدد غير صحيح داخل ملف النسخة الاحتياطية.");
+        return count;
+      };
+      const normalizeCode = (value: unknown) => {
+        const code = String(value ?? "").trim().toUpperCase();
+        if (!/^[A-Z]{2,3}$/.test(code)) throw new Error("يوجد كود جنسية غير صحيح داخل ملف النسخة الاحتياطية.");
+        return code;
+      };
+      const normalizeId = (value: unknown, index: number) => Number(value) > 0 ? Number(value) : Date.now() + index;
+      const restoredExclusions: Exclusion[] = parsed.exclusions.map((item: any, index: number) => ({
+        id: normalizeId(item?.id, index), code: normalizeCode(item?.code), count: normalizeCount(item?.count),
+      }));
+      const restoredArrivals: ArrivalRecord[] = parsed.arrivalRecords.map((item: any, index: number) => ({
+        id: normalizeId(item?.id, index), code: normalizeCode(item?.code), count: normalizeCount(item?.count),
+        arrivalDate: String(item?.arrivalDate ?? ""), departureDate: String(item?.departureDate ?? ""),
+      }));
+      const restoredAdditions: ManualAddition[] = parsed.additions.map((item: any, index: number) => ({
+        id: normalizeId(item?.id, index), code: normalizeCode(item?.code), count: normalizeCount(item?.count),
+      }));
+      setExclusions(restoredExclusions);
+      setArrivalRecords(restoredArrivals);
+      setAdditions(restoredAdditions);
+      setKind("success");
+      setMessage("تم استيراد الإعدادات الثلاثة بنجاح، وسيتم حفظها تلقائيًا على هذا الجهاز.");
+    } catch (error) {
+      setKind("error");
+      setMessage(error instanceof Error ? error.message : "تعذر قراءة ملف النسخة الاحتياطية.");
+    }
+  }
+
   async function generateReport() {
     if (!natFile || !manFile) {
       setKind("error");
@@ -145,6 +209,17 @@ export default function Home() {
         <h1>التقرير اليومي للجنسيات</h1>
         <p>حوّل ملفي nat.xml وman.xml إلى تقرير Excel منسق، يتضمن ملخص الجنسيات وبيانات الغرف وتفاصيل كل دولة.</p>
       </header>
+
+      <section className="panel">
+        <h2>إدارة البيانات والإعدادات</h2>
+        <p className="muted">صدّر الاستثناءات وسجلات الوصول والإضافات اليدوية في ملف واحد، ثم استورده على أي جهاز لاستعادة نفس القيم.</p>
+        <div className="uploads">
+          <button type="button" className="button" onClick={exportSettings} disabled={!ready}>تنزيل نسخة احتياطية للإعدادات</button>
+          <label className="button" htmlFor="settings-backup" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>استيراد نسخة احتياطية</label>
+          <input id="settings-backup" type="file" accept=".json,application/json" onChange={importSettings} style={{ display: "none" }} />
+        </div>
+        <p className="saved-hint">النسخة تشمل الأقسام 2 و3 و4 فقط. ملفات nat.xml وman.xml لا تدخل في النسخة الاحتياطية، ويجب اختيارها من الجهاز عند إنشاء كل تقرير.</p>
+      </section>
 
       <section className="panel">
         <h2>1. اختر ملفات التقرير</h2>
