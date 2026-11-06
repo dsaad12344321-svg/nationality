@@ -25,6 +25,7 @@ export default function Home() {
   const [inhFile, setInhFile] = useState<File | null>(null);
   const [missingRooms, setMissingRooms] = useState<string[]>([]);
   const [excludedRooms, setExcludedRooms] = useState<string[]>([]);
+  const [towelMismatches, setTowelMismatches] = useState<{ room: string; adults: number; children: number; expectedTowels: number; actualTowels: number }[]>([]);
   const [towelBusy, setTowelBusy] = useState(false);
   const [towelMessage, setTowelMessage] = useState("");
 
@@ -191,6 +192,32 @@ export default function Home() {
       setTowelMessage(`تم نسخ ${missingRooms.length} رقم غرفة.`);
     } catch {
       setTowelMessage("تعذر النسخ تلقائيًا. يمكنك تحديد النص ونسخه يدويًا.");
+    }
+  }
+
+  async function checkTowelCounts() {
+    if (!towelFile || !inhFile) {
+      setTowelMessage("من فضلك اختر ملف tc.xml وملف Guests INH - By Room أولاً.");
+      return;
+    }
+    setTowelBusy(true);
+    setTowelMessage("جارٍ مراجعة تطابق أعداد النزلاء والمناشف...");
+    setTowelMismatches([]);
+    try {
+      const data = new FormData();
+      data.append("file", towelFile);
+      data.append("inhFile", inhFile);
+      data.append("mode", "consistency");
+      const response = await fetch("/api/missing-towels", { method: "POST", body: data });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "تعذر فحص تطابق الأعداد.");
+      setTowelMismatches(result.mismatches || []);
+      setExcludedRooms(result.excludedRooms || []);
+      setTowelMessage(`انتهى الفحص: ${result.count} غرفة بها اختلاف في العدد، وتم تجاهل ${result.excludedCount || 0} غرفة تابعة لـ House use.`);
+    } catch (error) {
+      setTowelMessage(error instanceof Error ? error.message : "حدث خطأ أثناء مراجعة أعداد المناشف.");
+    } finally {
+      setTowelBusy(false);
     }
   }
 
@@ -381,7 +408,7 @@ export default function Home() {
           <div className="uploads">
             <div className="upload">
               <label htmlFor="towel-file">1. تقرير المناشف — tc.xml</label>
-              <input id="towel-file" type="file" accept=".xml,text/xml,application/xml" onChange={(e) => { setTowelFile(e.target.files?.[0] ?? null); setMissingRooms([]); setExcludedRooms([]); setTowelMessage(""); }} />
+              <input id="towel-file" type="file" accept=".xml,text/xml,application/xml" onChange={(e) => { setTowelFile(e.target.files?.[0] ?? null); setMissingRooms([]); setExcludedRooms([]); setTowelMismatches([]); setTowelMessage(""); }} />
               {towelFile && <div className="filename">تم الاختيار: {towelFile.name}</div>}
             </div>
             <div className="upload">
@@ -408,6 +435,32 @@ export default function Home() {
               <p className="saved-hint">الناتج مفصول بفواصل، مثل: 0105,0121,0156,0159</p>
             </div>
           )}
+
+          <div className="towel-results">
+            <h3>أداة فرعية: مراجعة تطابق عدد النزلاء مع Towel Card</h3>
+            <p className="muted">تراجع كل غرفة وفق القاعدة: Adults + Children = Towel Card. مثال: 2 بالغين + 2 أطفال يجب أن يكون Towel Card = 4. يتم استبعاد غرف House use تلقائيًا، كما يتم تجاهل قيمة Towel Card الفارغة لأنها تظهر في نتيجة الأداة الأصلية.</p>
+            <button type="button" className="button" onClick={checkTowelCounts} disabled={towelBusy || !towelFile || !inhFile}>{towelBusy ? "جارٍ الفحص..." : "فحص أخطاء عدد Towel Card"}</button>
+            {towelMismatches.length > 0 && (
+              <>
+                <h3>الغرف التي بها اختلاف ({towelMismatches.length})</h3>
+                <div className="table-wrap">
+                  <table>
+                    <thead><tr><th>الغرفة</th><th>Adults</th><th>Children</th><th>المفترض</th><th>Towel Card</th></tr></thead>
+                    <tbody>
+                      {towelMismatches.map((item) => (
+                        <tr key={item.room}>
+                          <td>{item.room}</td><td>{item.adults}</td><td>{item.children}</td>
+                          <td>{item.expectedTowels}</td><td>{item.actualTowels}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <button type="button" className="add-button" onClick={() => navigator.clipboard.writeText(towelMismatches.map((item) => item.room).join(","))}>نسخ أرقام الغرف المخالفة</button>
+              </>
+            )}
+            {towelMismatches.length === 0 && towelMessage.startsWith("انتهى الفحص:") && <p className="saved-hint">لم يتم العثور على اختلافات في الأعداد.</p>}
+          </div>
         </section>
       )}
       <p className="foot">التقرير يُنشأ عند الطلب بصيغة Excel (.xlsx).</p>
