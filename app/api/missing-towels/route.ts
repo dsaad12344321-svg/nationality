@@ -12,8 +12,9 @@ const parser = new XMLParser({
 });
 
 type XmlNode = string | number | boolean | null | undefined | XmlNode[] | { [key: string]: XmlNode };
+type TowelRow = { room: string; towel: string; adults: string; children: string };
 
-function findRoomRows(node: XmlNode, rows: { room: string; towel: string }[] = []) {
+function findRoomRows(node: XmlNode, rows: TowelRow[] = []) {
   if (Array.isArray(node)) {
     for (const item of node) findRoomRows(item, rows);
     return rows;
@@ -22,10 +23,18 @@ function findRoomRows(node: XmlNode, rows: { room: string; towel: string }[] = [
 
   const record = node as Record<string, XmlNode>;
   if (Object.prototype.hasOwnProperty.call(record, "C18") &&
+      Object.prototype.hasOwnProperty.call(record, "C42") &&
+      Object.prototype.hasOwnProperty.call(record, "C45") &&
       Object.prototype.hasOwnProperty.call(record, "C48")) {
     const room = String(record.C18 ?? "").trim();
-    const towel = String(record.C48 ?? "").trim();
-    if (/^\d+$/.test(room)) rows.push({ room, towel });
+    if (/^\d+$/.test(room)) {
+      rows.push({
+        room,
+        adults: String(record.C42 ?? "").trim(),
+        children: String(record.C45 ?? "").trim(),
+        towel: String(record.C48 ?? "").trim(),
+      });
+    }
   }
 
   for (const value of Object.values(record)) findRoomRows(value, rows);
@@ -58,6 +67,7 @@ export async function POST(request: Request) {
     const form = await request.formData();
     const file = form.get("file");
     const inhFile = form.get("inhFile");
+    const mode = String(form.get("mode") || "missing");
     if (!(file instanceof File) || !(inhFile instanceof File)) {
       return NextResponse.json({ error: "من فضلك ارفع ملف تقرير المناشف وملف Guests INH - By Room." }, { status: 400 });
     }
@@ -79,7 +89,7 @@ export async function POST(request: Request) {
 
     const rows = findRoomRows(parsed);
     if (!rows.length) {
-      return NextResponse.json({ error: "لم يتم العثور على سجلات الغرف أو الحقلين C18 وC48 في الملف." }, { status: 400 });
+      return NextResponse.json({ error: "لم يتم العثور على سجلات الغرف أو الحقول C18 وC42 وC45 وC48 في الملف." }, { status: 400 });
     }
 
     let inhParsed: XmlNode;
@@ -92,6 +102,33 @@ export async function POST(request: Request) {
     const houseUseRooms = new Set<string>();
     const excludedCompanies = new Set<string>();
     findCompanyRooms(inhParsed, houseUseRooms, excludedCompanies);
+
+    if (mode === "consistency") {
+      const mismatches = rows
+        .filter((row) => {
+          const room = row.room.padStart(4, "0");
+          if (houseUseRooms.has(room) || row.towel === "") return false;
+          if (!/^\d+$/.test(row.adults) || !/^\d+$/.test(row.children) || !/^\d+$/.test(row.towel)) return false;
+          return Number(row.adults) + Number(row.children) !== Number(row.towel);
+        })
+        .map((row) => ({
+          room: row.room.padStart(4, "0"),
+          adults: Number(row.adults),
+          children: Number(row.children),
+          expectedTowels: Number(row.adults) + Number(row.children),
+          actualTowels: Number(row.towel),
+        }))
+        .sort((a, b) => Number(a.room) - Number(b.room));
+
+      return NextResponse.json({
+        mismatches,
+        count: mismatches.length,
+        scannedRows: rows.length,
+        excludedCount: rows.filter((row) => houseUseRooms.has(row.room.padStart(4, "0"))).length,
+        excludedRooms: [...new Set(rows.filter((row) => houseUseRooms.has(row.room.padStart(4, "0"))).map((row) => row.room.padStart(4, "0")))].sort((a, b) => Number(a) - Number(b)),
+        excludedCompanies: [...excludedCompanies],
+      });
+    }
 
     const missingRooms = [...new Set(
       rows.filter((row) => row.towel === "").map((row) => row.room.padStart(4, "0"))
