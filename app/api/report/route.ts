@@ -171,7 +171,7 @@ const COUNTRY_NAMES: Record<string, string> = {
   OM: "Oman", YE: "Yemen", SY: "Syria", NL: "Netherlands", AT: "Austria", CH: "Switzerland", SE: "Sweden",
   NO: "Norway", DK: "Denmark", FI: "Finland", CZ: "Czech Republic", SK: "Slovakia", HU: "Hungary",
   RO: "Romania", BG: "Bulgaria", GR: "Greece", TR: "Turkey", CA: "Canada", AU: "Australia",
-  BR: "Brazil", MX: "Mexico", ZA: "South Africa",
+  BR: "Brazil", MX: "Mexico", ZA: "South Africa", UN: "غير محدد",
 };
 
 function loadGuestInh(xml: string, exclusions: { code: string; count: number }[] = [], additions: { code: string; count: number }[] = []) {
@@ -180,8 +180,8 @@ function loadGuestInh(xml: string, exclusions: { code: string; count: number }[]
   let matchedRows = 0;
 
   for (const row of descendants(root, "G_C12")) {
-    const code = firstText(row, "C69").trim().toUpperCase();
-    if (!code) continue;
+    const rawCode = firstText(row, "C69").trim().toUpperCase();
+    const code = rawCode ? rawCode : "UN";
     if (!/^[A-Z]{2,3}$/.test(code)) continue;
     const adults = number(firstText(row, "C33"));
     const children = number(firstText(row, "C39"));
@@ -194,7 +194,7 @@ function loadGuestInh(xml: string, exclusions: { code: string; count: number }[]
   }
 
   if (!matchedRows || !grouped.size) {
-    throw new Error("لم يتم العثور على سجلات جنسيات صالحة في تقرير Guest INH By Nationality. تأكد من وجود الحقول C33 وC39 وC69.");
+    throw new Error("لم يتم العثور على سجلات جنسيات صالحة في تقرير Guest INH By Nationality. تأكد من وجود الحقول C33 وC39 وC69. السجلات التي لا تحتوي على كود جنسية تُسجل تحت «غير محدد».");
   }
 
   const countryXml = [...grouped.entries()].map(([code, count]) =>
