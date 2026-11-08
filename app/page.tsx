@@ -162,7 +162,7 @@ export default function Home() {
       return;
     }
     if (!towelFile.name.toLowerCase().endsWith(".xml") || !inhFile.name.toLowerCase().endsWith(".xml")) {
-      setTowelMessage("يجب أن يكون الملفان بصيغة XML.");
+      setTowelMessage("يجب أن يكون ملف الجنسيات وملف man.xml بصيغة XML.");
       return;
     }
     setTowelBusy(true);
@@ -224,7 +224,7 @@ export default function Home() {
   async function generateReport() {
     if (!natFile || !manFile) {
       setKind("error");
-      setMessage("من فضلك اختر الملفين nat.xml وman.xml أولاً.");
+      setMessage("من فضلك اختر ملف nat.xml أو Guest INH By Nationality، بالإضافة إلى man.xml.");
       return;
     }
     if (!natFile.name.toLowerCase().endsWith(".xml") || !manFile.name.toLowerCase().endsWith(".xml")) {
@@ -280,7 +280,7 @@ export default function Home() {
       <header className="hero">
         <p className="eyebrow">أداة التقارير الفندقية</p>
         <h1>{activeTool === "nationality" ? "التقرير اليومي للجنسيات" : "Missing Towel Detector"}</h1>
-        <p>{activeTool === "nationality" ? "حوّل ملفي nat.xml وman.xml إلى تقرير Excel منسق، يتضمن ملخص الجنسيات وبيانات الغرف وتفاصيل كل دولة." : "ارفع تقرير الغرف لاستخراج أرقام الغرف التي لا تحتوي على Towel Card."}</p>
+        <p>{activeTool === "nationality" ? "حوّل ملف nat.xml أو Guest INH By Nationality مع man.xml إلى تقرير Excel منسق، يتضمن ملخص الجنسيات وتفاصيل كل دولة." : "ارفع تقرير الغرف لاستخراج أرقام الغرف التي لا تحتوي على Towel Card."}</p>
       </header>
 
       <section className="panel tool-picker">
@@ -306,10 +306,10 @@ export default function Home() {
 
       <section className="panel">
         <h2>1. اختر ملفات التقرير</h2>
-        <p className="muted">اختر ملف الجنسيات nat.xml وملف بيانات الفندق man.xml من جهازك. تتم معالجة الملفات عند طلب إنشاء التقرير ولا يتم حفظها في الموقع.</p>
+        <p className="muted">اختر ملف الجنسيات nat.xml المعتاد أو التقرير البديل Guest INH By Nationality، مع ملف بيانات الفندق man.xml. يتعرف النظام تلقائيًا على نوع ملف الجنسيات من بنيته، وتتم معالجة الملفات عند إنشاء التقرير فقط دون حفظها في الموقع.</p>
         <div className="uploads">
           <div className="upload">
-            <label htmlFor="nat">ملف الجنسيات — nat.xml</label>
+            <label htmlFor="nat">ملف الجنسيات — nat.xml أو Guest INH By Nationality</label>
             <input id="nat" type="file" accept=".xml,text/xml,application/xml" onChange={(e) => setNatFile(e.target.files?.[0] ?? null)} />
             {natFile && <div className="filename">تم الاختيار: {natFile.name}</div>}
           </div>
