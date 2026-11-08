@@ -161,6 +161,62 @@ function loadNat(xml: string, exclusions: { code: string; count: number }[] = []
   return { bycat, total, countryRows };
 }
 
+
+const COUNTRY_NAMES: Record<string, string> = {
+  EG: "Egypt", US: "United States", GB: "United Kingdom", DE: "Germany", UA: "Ukraine", RU: "Russia",
+  BE: "Belgium", PL: "Poland", CN: "China", FR: "France", IT: "Italy", IN: "India", JP: "Japan",
+  HR: "Croatia", PK: "Pakistan", ES: "Spain", IR: "Iran", IL: "Israel", SA: "Saudi Arabia", IQ: "Iraq",
+  LY: "Libya", LB: "Lebanon", SD: "Sudan", PS: "Palestine", JO: "Jordan", MA: "Morocco", DZ: "Algeria",
+  TN: "Tunisia", MR: "Mauritania", BH: "Bahrain", AE: "United Arab Emirates", KW: "Kuwait", QA: "Qatar",
+  OM: "Oman", YE: "Yemen", SY: "Syria", NL: "Netherlands", AT: "Austria", CH: "Switzerland", SE: "Sweden",
+  NO: "Norway", DK: "Denmark", FI: "Finland", CZ: "Czech Republic", SK: "Slovakia", HU: "Hungary",
+  RO: "Romania", BG: "Bulgaria", GR: "Greece", TR: "Turkey", CA: "Canada", AU: "Australia",
+  BR: "Brazil", MX: "Mexico", ZA: "South Africa",
+};
+
+function loadGuestInh(xml: string, exclusions: { code: string; count: number }[] = [], additions: { code: string; count: number }[] = []) {
+  const root = parseXml(xml, "Guest INH By Nationality");
+  const grouped = new Map<string, number>();
+  let matchedRows = 0;
+
+  for (const row of descendants(root, "G_C12")) {
+    const code = firstText(row, "C69").trim().toUpperCase();
+    if (!code) continue;
+    if (!/^[A-Z]{2,3}$/.test(code)) continue;
+    const adults = number(firstText(row, "C33"));
+    const children = number(firstText(row, "C39"));
+    if (adults < 0 || children < 0) {
+      throw new Error("يوجد عدد Adults أو Children غير صحيح في تقرير Guest INH By Nationality.");
+    }
+    const count = adults + children;
+    grouped.set(code, (grouped.get(code) ?? 0) + count);
+    matchedRows++;
+  }
+
+  if (!matchedRows || !grouped.size) {
+    throw new Error("لم يتم العثور على سجلات جنسيات صالحة في تقرير Guest INH By Nationality. تأكد من وجود الحقول C33 وC39 وC69.");
+  }
+
+  const countryXml = [...grouped.entries()].map(([code, count]) =>
+    "<G_COUNTRY_CODE><COUNTRY_NAME>" + (COUNTRY_NAMES[code] ?? "Other") +
+    "</COUNTRY_NAME><COUNTRY_CODE>" + code + "</COUNTRY_CODE><VALUE>" + count +
+    "</VALUE></G_COUNTRY_CODE>"
+  ).join("");
+  const normalizedXml = "<NATIONALITY_REPORT>" + countryXml + "</NATIONALITY_REPORT>";
+  return loadNat(normalizedXml, exclusions, additions);
+}
+
+function loadNationality(xml: string, exclusions: { code: string; count: number }[] = [], additions: { code: string; count: number }[] = []) {
+  const root = parseXml(xml, "ملف الجنسيات");
+  if (descendants(root, "G_COUNTRY_CODE").length > 0) {
+    return loadNat(xml, exclusions, additions);
+  }
+  if (descendants(root, "G_C12").length > 0) {
+    return loadGuestInh(xml, exclusions, additions);
+  }
+  throw new Error("صيغة ملف الجنسيات غير معروفة. ارفع nat.xml أو تقرير Guest INH By Nationality.");
+}
+
 function loadMan(xml: string) {
   const root = parseXml(xml, "man.xml");
   const wanted: Record<string, string> = {
@@ -214,13 +270,13 @@ export async function POST(request: Request) {
       }
     }
     if (!(nat instanceof File) || !(man instanceof File)) {
-      return NextResponse.json({ error: "يجب رفع الملفين nat.xml وman.xml." }, { status: 400 });
+      return NextResponse.json({ error: "يجب رفع ملف الجنسيات (nat.xml أو Guest INH By Nationality) وملف man.xml." }, { status: 400 });
     }
     if (nat.size > 20 * 1024 * 1024 || man.size > 20 * 1024 * 1024) {
       return NextResponse.json({ error: "حجم كل ملف يجب ألا يتجاوز 20 ميجابايت." }, { status: 413 });
     }
     const [natXml, manXml] = await Promise.all([nat.text(), man.text()]);
-    const { bycat, total, countryRows } = loadNat(natXml, exclusions, additions);
+    const { bycat, total, countryRows } = loadNationality(natXml, exclusions, additions);
     const { values: manValues } = loadMan(manXml);
     const egyptians = bycat.egyptian ?? 0;
     const arabs = [...ARAB].reduce((sum, key) => sum + (bycat[key] ?? 0), 0);
