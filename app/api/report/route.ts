@@ -264,11 +264,11 @@ function loadRoomInh(xml: string): RoomSummary {
     if (record.ROOM !== undefined && record.COMPANY_NAME !== undefined) {
       const rawRoom = textValue(record.ROOM).trim();
       const company = textValue(record.COMPANY_NAME).trim();
-      if (/^\\d+$/.test(rawRoom)) {
+      if (/^\d+$/.test(rawRoom)) {
         const room = rawRoom.padStart(4, "0");
         const current = roomMap.get(room) ?? { companies: new Set<string>(), houseUse: false };
         if (company) current.companies.add(company);
-        if (/house\\s*use/i.test(company)) current.houseUse = true;
+        if (/house\s*use/i.test(company)) current.houseUse = true;
         roomMap.set(room, current);
       }
     }
@@ -298,7 +298,7 @@ function loadRoomInh(xml: string): RoomSummary {
 function parseArrivalDate(value: string): number | null {
   const raw = value.trim();
   if (!raw) return null;
-  let match = raw.match(/^(\\d{1,2})-([A-Za-z]{3})-(\\d{2,4})$/);
+  let match = raw.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{2,4})$/);
   if (match) {
     const months: Record<string, number> = { JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5, JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11 };
     const month = months[match[2].toUpperCase()];
@@ -307,9 +307,9 @@ function parseArrivalDate(value: string): number | null {
     if (year < 100) year += 2000;
     return Date.UTC(year, month, Number(match[1]));
   }
-  match = raw.match(/^(\\d{4})[-/](\\d{1,2})[-/](\\d{1,2})$/);
+  match = raw.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
   if (match) return Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-  match = raw.match(/^(\\d{1,2})[-/](\\d{1,2})[-/](\\d{4})$/);
+  match = raw.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
   if (match) return Date.UTC(Number(match[3]), Number(match[2]) - 1, Number(match[1]));
   return null;
 }
