@@ -364,21 +364,21 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "صيغة بيانات الإضافات اليدوية غير صحيحة." }, { status: 400 });
       }
     }
-    if (!(nat instanceof File) || !(roomInh instanceof File)) {
-      return NextResponse.json({ error: "يجب رفع ملف الجنسيات وملف Guests INH - By Room. ملف man.xml اختياري." }, { status: 400 });
+    if (!(nat instanceof File) || (!(roomInh instanceof File) && !(man instanceof File))) {
+      return NextResponse.json({ error: "يجب رفع ملف الجنسيات nat.xml، ومعه ملف man.xml أو Guests INH - By Room على الأقل." }, { status: 400 });
     }
-    if (!nat.name.toLowerCase().endsWith(".xml") || !roomInh.name.toLowerCase().endsWith(".xml") || (man instanceof File && !man.name.toLowerCase().endsWith(".xml"))) {
+    if (!nat.name.toLowerCase().endsWith(".xml") || (roomInh instanceof File && !roomInh.name.toLowerCase().endsWith(".xml")) || (man instanceof File && !man.name.toLowerCase().endsWith(".xml"))) {
       return NextResponse.json({ error: "يجب أن تكون الملفات بصيغة XML." }, { status: 400 });
     }
-    if (nat.size > 20 * 1024 * 1024 || roomInh.size > 20 * 1024 * 1024 || (man instanceof File && man.size > 20 * 1024 * 1024)) {
+    if (nat.size > 20 * 1024 * 1024 || (roomInh instanceof File && roomInh.size > 20 * 1024 * 1024) || (man instanceof File && man.size > 20 * 1024 * 1024)) {
       return NextResponse.json({ error: "حجم كل ملف يجب ألا يتجاوز 20 ميجابايت." }, { status: 413 });
     }
-    const [natXml, roomInhXml, manXml] = await Promise.all([nat.text(), roomInh.text(), man instanceof File ? man.text() : Promise.resolve("")]);
+    const [natXml, roomInhXml, manXml] = await Promise.all([nat.text(), roomInh instanceof File ? roomInh.text() : Promise.resolve(""), man instanceof File ? man.text() : Promise.resolve("")]);
     const { bycat, total, countryRows } = loadNationality(natXml, exclusions, additions);
-    const roomSummary = loadRoomInh(roomInhXml);
+    const roomSummary = roomInh instanceof File ? loadRoomInh(roomInhXml) : null;
     const { values: manValues } = man instanceof File
       ? loadMan(manXml)
-      : { values: { OCC_PERC_WO_CH: "غير متاح" as number | string, OCC_MINUS_COMP_HU: roomSummary.guestRoomCount, ARRIVAL_ROOMS: "غير متاح" as number | string } };
+      : { values: { OCC_PERC_WO_CH: "غير متاح" as number | string, OCC_MINUS_COMP_HU: roomSummary?.guestRoomCount ?? "غير متاح", ARRIVAL_ROOMS: "غير متاح" as number | string } };
     const latestBritish = countBritishOnLatestArrival(natXml);
     const egyptians = bycat.egyptian ?? 0;
     const arabs = [...ARAB].reduce((sum, key) => sum + (bycat[key] ?? 0), 0);
@@ -443,31 +443,34 @@ export async function POST(request: Request) {
       });
     });
 
-    const roomsSheet = workbook.addWorksheet("بيانات الغرف", { views: [{ rightToLeft: true, state: "frozen", ySplit: 1 }] });
-    roomsSheet.addRow(["ملخص الغرف", "العدد"]);
-    roomsSheet.addRow(["إجمالي الغرف", roomSummary.totalRooms]);
-    roomsSheet.addRow(["غرف House use", roomSummary.houseUseRooms.length]);
-    roomsSheet.addRow(["غرف Guests", roomSummary.guestRooms.length]);
-    roomsSheet.addRow([]);
-    roomsSheet.addRow(["رقم الغرفة", "التصنيف", "الشركة / الجهة"]);
-    for (const item of roomSummary.houseUseRooms) roomsSheet.addRow([item.room, "House use", item.company]);
-    for (const item of roomSummary.guestRooms) roomsSheet.addRow([item.room, "Guest", item.company]);
-    roomsSheet.columns = [{ width: 18 }, { width: 20 }, { width: 38 }];
-    roomsSheet.getRow(1).eachCell((cell) => {
-      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + blue } };
-      cell.font = { name: "Arial", bold: true, color: { argb: "FFFFFFFF" }, size: 12 };
-    });
-    roomsSheet.getRow(6).eachCell((cell) => {
-      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + blue } };
-      cell.font = { name: "Arial", bold: true, color: { argb: "FFFFFFFF" }, size: 12 };
-    });
-    roomsSheet.eachRow((row, rowNumber) => {
-      if (rowNumber === 1 || rowNumber === 6) return;
-      row.eachCell((cell) => {
-        cell.font = { name: "Arial", size: 11 };
-        cell.border = { bottom: { style: "thin", color: { argb: "FFD9E1F2" } } };
+    if (roomSummary) {
+      const roomsSheet = workbook.addWorksheet("بيانات الغرف", { views: [{ rightToLeft: true, state: "frozen", ySplit: 1 }] });
+      roomsSheet.addRow(["ملخص الغرف", "العدد"]);
+      roomsSheet.addRow(["إجمالي الغرف", roomSummary.totalRooms]);
+      roomsSheet.addRow(["غرف House use", roomSummary.houseUseRooms.length]);
+      roomsSheet.addRow(["غرف Guests", roomSummary.guestRooms.length]);
+      roomsSheet.addRow([]);
+      roomsSheet.addRow(["رقم الغرفة", "التصنيف", "الشركة / الجهة"]);
+      for (const item of roomSummary.houseUseRooms) roomsSheet.addRow([item.room, "House use", item.company]);
+      for (const item of roomSummary.guestRooms) roomsSheet.addRow([item.room, "Guest", item.company]);
+      roomsSheet.columns = [{ width: 18 }, { width: 20 }, { width: 38 }];
+      roomsSheet.getRow(1).eachCell((cell) => {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + blue } };
+        cell.font = { name: "Arial", bold: true, color: { argb: "FFFFFFFF" }, size: 12 };
       });
-    });
+      roomsSheet.getRow(6).eachCell((cell) => {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + blue } };
+        cell.font = { name: "Arial", bold: true, color: { argb: "FFFFFFFF" }, size: 12 };
+      });
+      roomsSheet.eachRow((row, rowNumber) => {
+        if (rowNumber === 1 || rowNumber === 6) return;
+        row.eachCell((cell) => {
+          cell.font = { name: "Arial", size: 11 };
+          cell.border = { bottom: { style: "thin", color: { argb: "FFD9E1F2" } } };
+        });
+      });
+  
+    }
     const buffer = await workbook.xlsx.writeBuffer();
     return new Response(buffer, {
       status: 200,
