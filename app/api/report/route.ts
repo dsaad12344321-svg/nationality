@@ -13,7 +13,7 @@ const parser = new XMLParser({
   removeNSPrefix: true,
   parseTagValue: false,
   trimValues: true,
-  isArray: (name) => ["G_COUNTRY_CODE", "G_MASTER_VALUE", "G_HEADING_1_ORDER", "G_SUM_AMOUNT"].includes(name),
+  isArray: (name) => ["G_COUNTRY_CODE", "G_MASTER_VALUE", "G_HEADING_1_ORDER", "G_SUM_AMOUNT", "G_ROOM"].includes(name),
 });
 
 const ALIASES: Record<string, string> = {
