@@ -223,12 +223,12 @@ export default function Home() {
   }
 
   async function generateReport() {
-    if (!natFile || !roomInhFile) {
+    if (!natFile || (!roomInhFile && !manFile)) {
       setKind("error");
-      setMessage("من فضلك اختر ملف الجنسيات وملف Guests INH - By Room. ملف man.xml اختياري.");
+      setMessage("من فضلك اختر ملف الجنسيات nat.xml، ومعه ملف man.xml أو Guests INH - By Room على الأقل.");
       return;
     }
-    if (!natFile.name.toLowerCase().endsWith(".xml") || !roomInhFile.name.toLowerCase().endsWith(".xml") || (manFile && !manFile.name.toLowerCase().endsWith(".xml"))) {
+    if (!natFile.name.toLowerCase().endsWith(".xml") || (roomInhFile && !roomInhFile.name.toLowerCase().endsWith(".xml")) || (manFile && !manFile.name.toLowerCase().endsWith(".xml"))) {
       setKind("error");
       setMessage("يجب أن تكون الملفات المختارة بصيغة XML.");
       return;
@@ -249,7 +249,7 @@ export default function Home() {
     try {
       const data = new FormData();
       data.append("nat", natFile);
-      data.append("roomInh", roomInhFile);
+      if (roomInhFile) data.append("roomInh", roomInhFile);
       if (manFile) data.append("man", manFile);
       data.append("exclusions", JSON.stringify(exclusions.map(({ code, count }) => ({ code, count }))));
       data.append("additions", JSON.stringify(additions.map(({ code, count }) => ({ code, count }))));
@@ -282,7 +282,7 @@ export default function Home() {
       <header className="hero">
         <p className="eyebrow">أداة التقارير الفندقية</p>
         <h1>{activeTool === "nationality" ? "التقرير اليومي للجنسيات" : "Missing Towel Detector"}</h1>
-        <p>{activeTool === "nationality" ? "حوّل ملف الجنسيات مع Guests INH - By Room إلى تقرير Excel. ملف man.xml اختياري، وسيُنشأ تبويب مستقل لتصنيف الغرف." : "ارفع تقرير الغرف لاستخراج أرقام الغرف التي لا تحتوي على Towel Card."}</p>
+        <p>{activeTool === "nationality" ? "حوّل ملفات nat.xml وman.xml إلى تقرير Excel، ويمكن إضافة Guests INH - By Room لإنشاء تبويب تفاصيل الغرف." : "ارفع تقرير الغرف لاستخراج أرقام الغرف التي لا تحتوي على Towel Card."}</p>
       </header>
 
       <section className="panel tool-picker">
@@ -308,7 +308,7 @@ export default function Home() {
 
       <section className="panel">
         <h2>1. اختر ملفات التقرير</h2>
-        <p className="muted">اختر ملف الجنسيات nat.xml أو Guest INH By Nationality، وملف Guests INH - By Room. ملف man.xml اختياري؛ عند عدم رفعه تُستخدم بيانات الغرف لاحتساب الغرف المشغولة، ويُضاف تبويب مستقل للغرف وHouse use. يتعرف النظام على نوع ملف الجنسيات تلقائيًا.</p>
+        <p className="muted">اختر ملف الجنسيات nat.xml، ومعه ملف man.xml أو Guests INH - By Room على الأقل. عند رفع man.xml تُستخدم بياناته للنسبة والغرف المشغولة وعدد غرف الوصول. ويمكنك إضافة Guests INH - By Room لإنشاء تبويب مستقل بتفاصيل الغرف وتصنيف House use. يتعرف النظام على نوع ملف الجنسيات تلقائيًا.</p>
         <div className="uploads">
           <div className="upload">
             <label htmlFor="nat">ملف الجنسيات — nat.xml أو Guest INH By Nationality</label>
@@ -316,7 +316,7 @@ export default function Home() {
             {natFile && <div className="filename">تم الاختيار: {natFile.name}</div>}
           </div>
           <div className="upload">
-            <label htmlFor="room-inh">تقرير الغرف — Guests INH - By Room (مطلوب)</label>
+            <label htmlFor="room-inh">تقرير الغرف — Guests INH - By Room (اختياري)</label>
             <input id="room-inh" type="file" accept=".xml,text/xml,application/xml" onChange={(e) => setRoomInhFile(e.target.files?.[0] ?? null)} />
             {roomInhFile && <div className="filename">تم الاختيار: {roomInhFile.name}</div>}
           </div>
@@ -326,7 +326,7 @@ export default function Home() {
             {manFile && <div className="filename">تم الاختيار: {manFile.name}</div>}
           </div>
         </div>
-        <button className="button" onClick={generateReport} disabled={busy || !ready || !natFile || !roomInhFile}>{busy ? "جارٍ إنشاء التقرير..." : "إنشاء وتنزيل ملف Excel"}</button>
+        <button className="button" onClick={generateReport} disabled={busy || !ready || !natFile || (!roomInhFile && !manFile)}>{busy ? "جارٍ إنشاء التقرير..." : "إنشاء وتنزيل ملف Excel"}</button>
         {message && <div role="status" className={"notice " + (kind === "error" ? "error" : kind === "success" ? "success" : "")}>{message}</div>}
       </section>
 
