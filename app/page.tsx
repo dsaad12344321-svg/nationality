@@ -321,7 +321,7 @@ export default function Home() {
             </div>
             <div className="upload">
               <label htmlFor="guest-inh">Guest INH By Nationality</label>
-              <input id="nat" type="file" accept=".xml,text/xml,application/xml" onChange={(e) => setNatFile(e.target.files?.[0] ?? null)} />
+              <input id="guest-inh" type="file" accept=".xml,text/xml,application/xml" onChange={(e) => setNatFile(e.target.files?.[0] ?? null)} />
               {natFile && <div className="filename">تم الاختيار: {natFile.name}</div>}
             </div>
           </div>
