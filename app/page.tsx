@@ -14,6 +14,7 @@ export default function Home() {
   const [natFile, setNatFile] = useState<File | null>(null);
   const [manFile, setManFile] = useState<File | null>(null);
   const [roomInhFile, setRoomInhFile] = useState<File | null>(null);
+  const [compRooms, setCompRooms] = useState("0");
   const [exclusions, setExclusions] = useState<Exclusion[]>([]);
   const [arrivalRecords, setArrivalRecords] = useState<ArrivalRecord[]>([]);
   const [additions, setAdditions] = useState<ManualAddition[]>([]);
@@ -249,6 +250,7 @@ export default function Home() {
     try {
       const data = new FormData();
       data.append("nat", natFile);
+      data.append("compRooms", compRooms);
       if (roomInhFile) data.append("roomInh", roomInhFile);
       if (manFile) data.append("man", manFile);
       data.append("exclusions", JSON.stringify(exclusions.map(({ code, count }) => ({ code, count }))));
@@ -307,24 +309,42 @@ export default function Home() {
       </section>
 
       <section className="panel">
-        <h2>1. اختر ملفات التقرير</h2>
-        <p className="muted">اختر ملف الجنسيات nat.xml، ومعه ملف man.xml أو Guests INH - By Room على الأقل. عند رفع man.xml تُستخدم بياناته للنسبة والغرف المشغولة وعدد غرف الوصول. ويمكنك إضافة Guests INH - By Room لإنشاء تبويب مستقل بتفاصيل الغرف وتصنيف House use. يتعرف النظام على نوع ملف الجنسيات تلقائيًا.</p>
-        <div className="uploads">
-          <div className="upload">
-            <label htmlFor="nat">ملف الجنسيات — nat.xml أو Guest INH By Nationality</label>
-            <input id="nat" type="file" accept=".xml,text/xml,application/xml" onChange={(e) => setNatFile(e.target.files?.[0] ?? null)} />
-            {natFile && <div className="filename">تم الاختيار: {natFile.name}</div>}
+        <h2>1. ملفات التقرير</h2>
+        <p className="muted">ارفع تقارير ما قبل Night Run أو ملفات ما بعد Night Run. يمكنك استخدام nat.xml مع man.xml، أو تقارير ما قبل Night Run، أو الجمع بين الملفات حسب المتاح.</p>
+        <div className="panel" style={{ marginBottom: 16 }}>
+          <h3>Before Night Run</h3>
+          <div className="uploads">
+            <div className="upload">
+              <label htmlFor="room-inh">Guests INH - By Room</label>
+              <input id="room-inh" type="file" accept=".xml,text/xml,application/xml" onChange={(e) => setRoomInhFile(e.target.files?.[0] ?? null)} />
+              {roomInhFile && <div className="filename">تم الاختيار: {roomInhFile.name}</div>}
+            </div>
+            <div className="upload">
+              <label htmlFor="guest-inh">Guest INH By Nationality</label>
+              <input id="nat" type="file" accept=".xml,text/xml,application/xml" onChange={(e) => setNatFile(e.target.files?.[0] ?? null)} />
+              {natFile && <div className="filename">تم الاختيار: {natFile.name}</div>}
+            </div>
           </div>
-          <div className="upload">
-            <label htmlFor="room-inh">تقرير الغرف — Guests INH - By Room (اختياري)</label>
-            <input id="room-inh" type="file" accept=".xml,text/xml,application/xml" onChange={(e) => setRoomInhFile(e.target.files?.[0] ?? null)} />
-            {roomInhFile && <div className="filename">تم الاختيار: {roomInhFile.name}</div>}
+        </div>
+        <div className="panel" style={{ marginBottom: 16 }}>
+          <h3>After Night Run</h3>
+          <div className="uploads">
+            <div className="upload">
+              <label htmlFor="nat-after">nat.xml</label>
+              <input id="nat-after" type="file" accept=".xml,text/xml,application/xml" onChange={(e) => setNatFile(e.target.files?.[0] ?? null)} />
+              {natFile && <div className="filename">ملف الجنسيات المختار: {natFile.name}</div>}
+            </div>
+            <div className="upload">
+              <label htmlFor="man">man.xml</label>
+              <input id="man" type="file" accept=".xml,text/xml,application/xml" onChange={(e) => setManFile(e.target.files?.[0] ?? null)} />
+              {manFile && <div className="filename">تم الاختيار: {manFile.name}</div>}
+            </div>
           </div>
-          <div className="upload">
-            <label htmlFor="man">ملف بيانات الفندق — man.xml (اختياري)</label>
-            <input id="man" type="file" accept=".xml,text/xml,application/xml" onChange={(e) => setManFile(e.target.files?.[0] ?? null)} />
-            {manFile && <div className="filename">تم الاختيار: {manFile.name}</div>}
-          </div>
+        </div>
+        <div className="upload">
+          <label htmlFor="comp-rooms">عدد غرف Comp</label>
+          <input id="comp-rooms" type="number" min="0" step="1" value={compRooms} onChange={(e) => setCompRooms(e.target.value)} />
+          <p className="saved-hint">النسبة عند توفر تقرير الغرف = 100 × (عدد غرف Guests بعد استبعاد House Use − Comp) ÷ 965.</p>
         </div>
         <button className="button" onClick={generateReport} disabled={busy || !ready || !natFile || (!roomInhFile && !manFile)}>{busy ? "جارٍ إنشاء التقرير..." : "إنشاء وتنزيل ملف Excel"}</button>
         {message && <div role="status" className={"notice " + (kind === "error" ? "error" : kind === "success" ? "success" : "")}>{message}</div>}
