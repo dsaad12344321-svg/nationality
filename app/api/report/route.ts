@@ -248,11 +248,13 @@ type RoomSummary = {
   houseUseRooms: { room: string; company: string }[];
   guestRooms: { room: string; company: string }[];
   guestRoomCount: number;
+  latestArrivalRoomCount: number;
+  latestArrivalDate: string | null;
 };
 
 function loadRoomInh(xml: string): RoomSummary {
   const root = parseXml(xml, "Guests INH - By Room");
-  const roomMap = new Map<string, { companies: Set<string>; houseUse: boolean }>();
+  const roomMap = new Map<string, { companies: Set<string>; houseUse: boolean; arrivals: Map<number, string> }>();
 
   function visit(node: XmlValue) {
     if (!node || typeof node !== "object") return;
@@ -266,9 +268,12 @@ function loadRoomInh(xml: string): RoomSummary {
       const company = textValue(record.COMPANY_NAME).trim();
       if (/^\d+$/.test(rawRoom)) {
         const room = rawRoom.padStart(4, "0");
-        const current = roomMap.get(room) ?? { companies: new Set<string>(), houseUse: false };
+        const current = roomMap.get(room) ?? { companies: new Set<string>(), houseUse: false, arrivals: new Map<number, string>() };
         if (company) current.companies.add(company);
         if (/house\s*use/i.test(company)) current.houseUse = true;
+        const arrivalText = textValue(record.ARRIVAL).trim();
+        const arrivalKey = parseArrivalDate(arrivalText);
+        if (arrivalKey !== null) current.arrivals.set(arrivalKey, arrivalText);
         roomMap.set(room, current);
       }
     }
@@ -287,11 +292,21 @@ function loadRoomInh(xml: string): RoomSummary {
     if (info.houseUse) houseUseRooms.push(item);
     else guestRooms.push(item);
   }
+  const allArrivalKeys = [...roomMap.values()].flatMap((info) => [...info.arrivals.keys()]);
+  const latestArrivalKey = allArrivalKeys.length ? Math.max(...allArrivalKeys) : null;
+  const latestArrivalDate = latestArrivalKey === null
+    ? null
+    : [...roomMap.values()].flatMap((info) => [...info.arrivals.entries()]).find(([key]) => key === latestArrivalKey)?.[1] ?? null;
+  const latestArrivalRoomCount = latestArrivalKey === null ? 0 : [...roomMap.values()].filter(
+    (info) => !info.houseUse && info.arrivals.has(latestArrivalKey)
+  ).length;
   return {
     totalRooms: roomMap.size,
     houseUseRooms,
     guestRooms,
     guestRoomCount: guestRooms.length,
+    latestArrivalRoomCount,
+    latestArrivalDate,
   };
 }
 
@@ -309,8 +324,12 @@ function parseArrivalDate(value: string): number | null {
   }
   match = raw.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
   if (match) return Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-  match = raw.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
-  if (match) return Date.UTC(Number(match[3]), Number(match[2]) - 1, Number(match[1]));
+  match = raw.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$/);
+  if (match) {
+    let year = Number(match[3]);
+    if (year < 100) year += 2000;
+    return Date.UTC(year, Number(match[2]) - 1, Number(match[1]));
+  }
   return null;
 }
 
@@ -342,6 +361,11 @@ export async function POST(request: Request) {
     const nat = form.get("nat");
     const man = form.get("man");
     const roomInh = form.get("roomInh");
+    const compRaw = form.get("compRooms");
+    const compRooms = compRaw == null || String(compRaw).trim() === "" ? 0 : Number(compRaw);
+    if (!Number.isInteger(compRooms) || compRooms < 0) {
+      return NextResponse.json({ error: "عدد غرف Comp يجب أن يكون صفراً أو عدداً صحيحاً موجباً." }, { status: 400 });
+    }
     let exclusions: { code: string; count: number }[] = [];
     let additions: { code: string; count: number }[] = [];
     const exclusionsRaw = form.get("exclusions");
@@ -380,17 +404,22 @@ export async function POST(request: Request) {
       ? loadMan(manXml)
       : { values: { OCC_PERC_WO_CH: "غير متاح" as number | string, OCC_MINUS_COMP_HU: roomSummary?.guestRoomCount ?? "غير متاح", ARRIVAL_ROOMS: "غير متاح" as number | string } };
     const latestBritish = countBritishOnLatestArrival(natXml);
+    const occupiedGuestRooms = roomSummary?.guestRoomCount ?? null;
+    const calculatedPercentage = occupiedGuestRooms === null
+      ? null
+      : Math.round(((occupiedGuestRooms - compRooms) / 965) * 10000) / 100;
+    const arrivalRooms = roomSummary?.latestArrivalRoomCount ?? manValues.ARRIVAL_ROOMS ?? "غير متاح";
     const egyptians = bycat.egyptian ?? 0;
     const arabs = [...ARAB].reduce((sum, key) => sum + (bycat[key] ?? 0), 0);
     const foreigners = total - egyptians - arabs;
     const detailSum = DETAILS.reduce((sum, [, key]) => sum + (bycat[key] ?? 0), 0);
     const multi = foreigners - detailSum;
     const rows: [string, number | string][] = [
-      ["النسبة", manValues.OCC_PERC_WO_CH ?? "غير متاح"],
-      ["الغرف المشغولة", manValues.OCC_MINUS_COMP_HU ?? 0],
+      ["النسبة", calculatedPercentage ?? manValues.OCC_PERC_WO_CH ?? "غير متاح"],
+      ["الغرف المشغولة", occupiedGuestRooms ?? manValues.OCC_MINUS_COMP_HU ?? 0],
       ["المصريون", egyptians], ["العرب", arabs], ["الأجانب", foreigners], ["", ""],
       ...DETAILS.map(([label, key]) => [label, bycat[key] ?? 0] as [string, number]),
-      ["", ""], ["متعدد الوصول", multi], ["عدد الانجليز", latestBritish.count ?? "غير متاح"], ["عدد غرف الوصول", manValues.ARRIVAL_ROOMS ?? "غير متاح"],
+      ["", ""], ["متعدد الوصول", multi], ["عدد الانجليز", latestBritish.count ?? "غير متاح"], ["عدد غرف الوصول", arrivalRooms],
     ];
 
     const workbook = new ExcelJS.Workbook();
