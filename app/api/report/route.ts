@@ -408,7 +408,7 @@ export async function POST(request: Request) {
     const calculatedPercentage = occupiedGuestRooms === null
       ? null
       : Math.round(((occupiedGuestRooms - compRooms) / 965) * 10000) / 100;
-    const arrivalRooms = roomSummary?.latestArrivalRoomCount ?? manValues.ARRIVAL_ROOMS ?? "غير متاح";
+    const arrivalRooms = roomSummary?.latestArrivalDate ? roomSummary.latestArrivalRoomCount : manValues.ARRIVAL_ROOMS ?? "غير متاح";
     const egyptians = bycat.egyptian ?? 0;
     const arabs = [...ARAB].reduce((sum, key) => sum + (bycat[key] ?? 0), 0);
     const foreigners = total - egyptians - arabs;
