@@ -255,6 +255,7 @@ export default function Home() {
       if (manFile) data.append("man", manFile);
       data.append("exclusions", JSON.stringify(exclusions.map(({ code, count }) => ({ code, count }))));
       data.append("additions", JSON.stringify(additions.map(({ code, count }) => ({ code, count }))));
+      data.append("arrivalRecords", JSON.stringify(arrivalRecords.map(({ code, count, arrivalDate, departureDate }) => ({ code, count, arrivalDate, departureDate }))));
       const response = await fetch("/api/report", { method: "POST", body: data });
       if (!response.ok) {
         const error = await response.json().catch(() => ({ error: "حدث خطأ غير متوقع." }));
