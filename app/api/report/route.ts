@@ -233,48 +233,60 @@ function loadNationalityRoomRows(
   }
 
   const rows: (string | number)[][] = [];
-  // الاستثناء يُخصم كعدد أشخاص من إجمالي الجنسية، ولا يحذف الجنسية بالكامل.
-  // نستهلك عدد الاستثناءات تدريجياً من سجلات الغرف ثم من السجلات اليدوية.
-  const exclusionRemaining = new Map<string, number>();
-  for (const item of exclusions) {
-    const code = String(item.code ?? "").trim().toUpperCase();
-    const count = Number(item.count);
-    if (TARGET_NATIONALITIES[code] && Number.isFinite(count) && count > 0) {
-      exclusionRemaining.set(code, (exclusionRemaining.get(code) ?? 0) + count);
-    }
-  }
+  const excludedCodes = new Set(
+    exclusions
+      .filter((item) => Number(item.count) > 0)
+      .map((item) => String(item.code ?? "").trim().toUpperCase())
+  );
+
+  const parseReportDate = (value: string): Date | null => {
+    const match = String(value ?? "").trim().match(/^(\\d{1,2})[-/](\\d{1,2})[-/](\\d{2}|\\d{4})$/);
+    if (!match) return null;
+    const day = Number(match[1]);
+    const month = Number(match[2]) - 1;
+    let year = Number(match[3]);
+    if (year < 100) year += year >= 70 ? 1900 : 2000;
+    const date = new Date(Date.UTC(year, month, day));
+    if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month || date.getUTCDate() !== day) return null;
+    return date;
+  };
 
   for (const record of descendants(guestRoot, "G_C12")) {
     const code = firstText(record, "C69").trim().toUpperCase();
     const nationality = TARGET_NATIONALITIES[code];
     if (!nationality) continue;
-    const originalPeople = number(firstText(record, "C33")) + number(firstText(record, "C39"));
-    if (originalPeople <= 0) continue;
-    const excluded = Math.min(originalPeople, exclusionRemaining.get(code) ?? 0);
-    const people = originalPeople - excluded;
-    exclusionRemaining.set(code, Math.max(0, (exclusionRemaining.get(code) ?? 0) - excluded));
+    const people = number(firstText(record, "C33")) + number(firstText(record, "C39"));
     if (people <= 0) continue;
     const room = firstText(record, "C15").trim().padStart(4, "0");
     const matched = roomInfo.get(room);
-    rows.push([
-      matched ? room : "",
-      people,
-      nationality,
-      matched?.arrival || firstText(record, "C45").trim(),
-      matched?.departure || firstText(record, "C57").trim(),
-      matched?.company || "",
-    ]);
+    const arrival = matched?.arrival || firstText(record, "C45").trim();
+    const departure = matched?.departure || firstText(record, "C57").trim();
+
+    // عند وجود استثناء لهذه الجنسية، نعرض السجلات التي تتجاوز إقامتها 30 يوماً
+    // باعتبارها السجلات المستثناة المطلوبة، بدلاً من حذف العدد بالتتابع.
+    if (excludedCodes.has(code)) {
+      const arrivalDate = parseReportDate(arrival);
+      const departureDate = parseReportDate(departure);
+      if (!arrivalDate || !departureDate) continue;
+      const stayDays = Math.round((departureDate.getTime() - arrivalDate.getTime()) / 86400000);
+      if (stayDays <= 30) continue;
+    }
+
+    rows.push([matched ? room : "", people, nationality, arrival, departure, matched?.company || ""]);
   }
 
   for (const item of manualArrivals) {
     const code = String(item.code ?? "").trim().toUpperCase();
     const nationality = TARGET_NATIONALITIES[code];
-    const originalCount = Number(item.count);
-    if (!nationality || !Number.isInteger(originalCount) || originalCount <= 0) continue;
-    const excluded = Math.min(originalCount, exclusionRemaining.get(code) ?? 0);
-    const count = originalCount - excluded;
-    exclusionRemaining.set(code, Math.max(0, (exclusionRemaining.get(code) ?? 0) - excluded));
-    if (count <= 0) continue;
+    const count = Number(item.count);
+    if (!nationality || !Number.isInteger(count) || count <= 0) continue;
+    if (excludedCodes.has(code)) {
+      const arrivalDate = parseReportDate(item.arrivalDate);
+      const departureDate = parseReportDate(item.departureDate);
+      if (!arrivalDate || !departureDate) continue;
+      const stayDays = Math.round((departureDate.getTime() - arrivalDate.getTime()) / 86400000);
+      if (stayDays <= 30) continue;
+    }
     rows.push(["", count, nationality, String(item.arrivalDate ?? ""), String(item.departureDate ?? ""), ""]);
   }
   return rows;
