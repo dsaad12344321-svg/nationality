@@ -215,8 +215,7 @@ const TARGET_NATIONALITIES: Record<string, string> = {
 function loadNationalityRoomRows(
   guestXml: string,
   roomXml: string,
-  manualArrivals: { code: string; count: number; arrivalDate: string; departureDate: string }[] = [],
-  exclusions: { code: string; count: number }[] = []
+  manualArrivals: { code: string; count: number; arrivalDate: string; departureDate: string }[] = []
 ): (string | number)[][] {
   const guestRoot = parseXml(guestXml, "Guest INH By Nationality");
   const roomRoot = parseXml(roomXml, "Guests INH - By Room");
@@ -233,23 +232,6 @@ function loadNationalityRoomRows(
   }
 
   const rows: (string | number)[][] = [];
-  const excludedCodes = new Set(
-    exclusions
-      .filter((item) => Number(item.count) > 0)
-      .map((item) => String(item.code ?? "").trim().toUpperCase())
-  );
-
-  const parseReportDate = (value: string): Date | null => {
-    const match = String(value ?? "").trim().match(/^(\\d{1,2})[-/](\\d{1,2})[-/](\\d{2}|\\d{4})$/);
-    if (!match) return null;
-    const day = Number(match[1]);
-    const month = Number(match[2]) - 1;
-    let year = Number(match[3]);
-    if (year < 100) year += year >= 70 ? 1900 : 2000;
-    const date = new Date(Date.UTC(year, month, day));
-    if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month || date.getUTCDate() !== day) return null;
-    return date;
-  };
 
   for (const record of descendants(guestRoot, "G_C12")) {
     const code = firstText(record, "C69").trim().toUpperCase();
@@ -261,16 +243,6 @@ function loadNationalityRoomRows(
     const matched = roomInfo.get(room);
     const arrival = matched?.arrival || firstText(record, "C45").trim();
     const departure = matched?.departure || firstText(record, "C57").trim();
-
-    // عند وجود استثناء لهذه الجنسية، نستبعد الإقامات الأطول من 30 يوماً.
-    if (excludedCodes.has(code)) {
-      const arrivalDate = parseReportDate(arrival);
-      const departureDate = parseReportDate(departure);
-      if (!arrivalDate || !departureDate) continue;
-      const stayDays = Math.round((departureDate.getTime() - arrivalDate.getTime()) / 86400000);
-      if (stayDays > 30) continue;
-    }
-
     rows.push([matched ? room : "", people, nationality, arrival, departure, matched?.company || ""]);
   }
 
@@ -279,13 +251,6 @@ function loadNationalityRoomRows(
     const nationality = TARGET_NATIONALITIES[code];
     const count = Number(item.count);
     if (!nationality || !Number.isInteger(count) || count <= 0) continue;
-    if (excludedCodes.has(code)) {
-      const arrivalDate = parseReportDate(item.arrivalDate);
-      const departureDate = parseReportDate(item.departureDate);
-      if (!arrivalDate || !departureDate) continue;
-      const stayDays = Math.round((departureDate.getTime() - arrivalDate.getTime()) / 86400000);
-      if (stayDays > 30) continue;
-    }
     rows.push(["", count, nationality, String(item.arrivalDate ?? ""), String(item.departureDate ?? ""), ""]);
   }
   return rows;
@@ -576,7 +541,7 @@ export async function POST(request: Request) {
 
 
     if (roomInh instanceof File && (descendants(parseXml(natXml, "ملف الجنسيات"), "G_C12").length > 0 || manualArrivals.length > 0)) {
-      const nationalityRooms = loadNationalityRoomRows(natXml, roomInhXml, manualArrivals, exclusions);
+      const nationalityRooms = loadNationalityRoomRows(natXml, roomInhXml, manualArrivals);
       const nationalitySheet = workbook.addWorksheet("جنسيات الغرف", { views: [{ rightToLeft: true, state: "frozen", ySplit: 1 }] });
       nationalitySheet.addRow(["رقم الغرفة", "عدد الأفراد", "الجنسية", "تاريخ الوصول", "تاريخ المغادرة", "الشركة"]);
       for (const row of nationalityRooms) nationalitySheet.addRow(row);
