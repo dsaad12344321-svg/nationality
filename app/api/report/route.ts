@@ -215,7 +215,8 @@ const TARGET_NATIONALITIES: Record<string, string> = {
 function loadNationalityRoomRows(
   guestXml: string,
   roomXml: string,
-  manualArrivals: { code: string; count: number; arrivalDate: string; departureDate: string }[] = []
+  manualArrivals: { code: string; count: number; arrivalDate: string; departureDate: string }[] = [],
+  exclusions: { code: string; count: number }[] = []
 ): (string | number)[][] {
   const guestRoot = parseXml(guestXml, "Guest INH By Nationality");
   const roomRoot = parseXml(roomXml, "Guests INH - By Room");
@@ -236,6 +237,8 @@ function loadNationalityRoomRows(
     const code = firstText(record, "C69").trim().toUpperCase();
     const nationality = TARGET_NATIONALITIES[code];
     if (!nationality) continue;
+    // إذا استُثنيت جنسية من التقرير الرئيسي، لا تظهر سجلاتها في تبويب جنسيات الغرف.
+    if (exclusions.some((item) => String(item.code).trim().toUpperCase() === code && Number(item.count) > 0)) continue;
     const people = number(firstText(record, "C33")) + number(firstText(record, "C39"));
     if (people <= 0) continue;
     const room = firstText(record, "C15").trim().padStart(4, "0");
@@ -545,7 +548,7 @@ export async function POST(request: Request) {
 
 
     if (roomInh instanceof File && (descendants(parseXml(natXml, "ملف الجنسيات"), "G_C12").length > 0 || manualArrivals.length > 0)) {
-      const nationalityRooms = loadNationalityRoomRows(natXml, roomInhXml, manualArrivals);
+      const nationalityRooms = loadNationalityRoomRows(natXml, roomInhXml, manualArrivals, exclusions);
       const nationalitySheet = workbook.addWorksheet("جنسيات الغرف", { views: [{ rightToLeft: true, state: "frozen", ySplit: 1 }] });
       nationalitySheet.addRow(["رقم الغرفة", "عدد الأفراد", "الجنسية", "تاريخ الوصول", "تاريخ المغادرة", "الشركة"]);
       for (const row of nationalityRooms) nationalitySheet.addRow(row);
