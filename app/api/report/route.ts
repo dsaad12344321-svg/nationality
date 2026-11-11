@@ -262,14 +262,13 @@ function loadNationalityRoomRows(
     const arrival = matched?.arrival || firstText(record, "C45").trim();
     const departure = matched?.departure || firstText(record, "C57").trim();
 
-    // عند وجود استثناء لهذه الجنسية، نعرض السجلات التي تتجاوز إقامتها 30 يوماً
-    // باعتبارها السجلات المستثناة المطلوبة، بدلاً من حذف العدد بالتتابع.
+    // عند وجود استثناء لهذه الجنسية، نستبعد الإقامات الأطول من 30 يوماً.
     if (excludedCodes.has(code)) {
       const arrivalDate = parseReportDate(arrival);
       const departureDate = parseReportDate(departure);
       if (!arrivalDate || !departureDate) continue;
       const stayDays = Math.round((departureDate.getTime() - arrivalDate.getTime()) / 86400000);
-      if (stayDays <= 30) continue;
+      if (stayDays > 30) continue;
     }
 
     rows.push([matched ? room : "", people, nationality, arrival, departure, matched?.company || ""]);
@@ -285,7 +284,7 @@ function loadNationalityRoomRows(
       const departureDate = parseReportDate(item.departureDate);
       if (!arrivalDate || !departureDate) continue;
       const stayDays = Math.round((departureDate.getTime() - arrivalDate.getTime()) / 86400000);
-      if (stayDays <= 30) continue;
+      if (stayDays > 30) continue;
     }
     rows.push(["", count, nationality, String(item.arrivalDate ?? ""), String(item.departureDate ?? ""), ""]);
   }
