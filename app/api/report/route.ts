@@ -206,6 +206,60 @@ function loadGuestInh(xml: string, exclusions: { code: string; count: number }[]
   return loadNat(normalizedXml, exclusions, additions);
 }
 
+
+const TARGET_NATIONALITIES: Record<string, string> = {
+  US: "أمريكي", ES: "إسباني", IR: "إيراني", LY: "ليبي", LB: "لبناني",
+  MA: "مغربي", DZ: "جزائري", TN: "تونسي", MR: "موريتاني", BH: "بحريني",
+};
+
+function loadNationalityRoomRows(
+  guestXml: string,
+  roomXml: string,
+  manualArrivals: { code: string; count: number; arrivalDate: string; departureDate: string }[] = []
+): (string | number)[][] {
+  const guestRoot = parseXml(guestXml, "Guest INH By Nationality");
+  const roomRoot = parseXml(roomXml, "Guests INH - By Room");
+  const roomInfo = new Map<string, { company: string; arrival: string; departure: string; people: number }>();
+  for (const row of descendants(roomRoot, "G_ROOM")) {
+    const room = firstText(row, "ROOM").trim().padStart(4, "0");
+    if (!/^\\d{4}$/.test(room)) continue;
+    roomInfo.set(room, {
+      company: firstText(row, "COMPANY_NAME").trim(),
+      arrival: firstText(row, "ARRIVAL").trim(),
+      departure: firstText(row, "DEPARTURE").trim(),
+      people: number(firstText(row, "ADULTS")) + number(firstText(row, "CHILDREN")),
+    });
+  }
+
+  const rows: (string | number)[][] = [];
+  for (const record of descendants(guestRoot, "G_C12")) {
+    const code = firstText(record, "C69").trim().toUpperCase();
+    const nationality = TARGET_NATIONALITIES[code];
+    if (!nationality) continue;
+    const people = number(firstText(record, "C33")) + number(firstText(record, "C39"));
+    if (people <= 0) continue;
+    const room = firstText(record, "C15").trim().padStart(4, "0");
+    const matched = roomInfo.get(room);
+    rows.push([
+      matched ? room : "",
+      people,
+      nationality,
+      matched?.arrival || firstText(record, "C45").trim(),
+      matched?.departure || firstText(record, "C57").trim(),
+      matched?.company || "",
+    ]);
+  }
+
+  for (const item of manualArrivals) {
+    const code = String(item.code ?? "").trim().toUpperCase();
+    const nationality = TARGET_NATIONALITIES[code];
+    const count = Number(item.count);
+    if (!nationality || !Number.isInteger(count) || count <= 0) continue;
+    rows.push(["", count, nationality, String(item.arrivalDate ?? ""), String(item.departureDate ?? ""), ""]);
+  }
+  return rows;
+}
+
 function loadNationality(xml: string, exclusions: { code: string; count: number }[] = [], additions: { code: string; count: number }[] = []) {
   const root = parseXml(xml, "ملف الجنسيات");
   if (descendants(root, "G_COUNTRY_CODE").length > 0) {
@@ -404,6 +458,23 @@ export async function POST(request: Request) {
       ? loadMan(manXml)
       : { values: { OCC_PERC_WO_CH: "غير متاح" as number | string, OCC_MINUS_COMP_HU: roomSummary?.guestRoomCount ?? "غير متاح", ARRIVAL_ROOMS: "غير متاح" as number | string } };
     const latestBritish = countBritishOnLatestArrival(natXml);
+    let manualArrivals: { code: string; count: number; arrivalDate: string; departureDate: string }[] = [];
+    const arrivalRaw = form.get("arrivalRecords");
+    if (typeof arrivalRaw === "string" && arrivalRaw.trim()) {
+      try {
+        const parsed = JSON.parse(arrivalRaw);
+        if (!Array.isArray(parsed)) throw new Error();
+        manualArrivals = parsed.map((item) => ({
+          code: String(item?.code ?? ""),
+          count: Number(item?.count),
+          arrivalDate: String(item?.arrivalDate ?? ""),
+          departureDate: String(item?.departureDate ?? ""),
+        }));
+      } catch {
+        return NextResponse.json({ error: "صيغة سجلات الجنسيات ومواعيد الوصول غير صحيحة." }, { status: 400 });
+      }
+    }
+
     const occupiedGuestRooms = roomSummary?.guestRoomCount ?? null;
     const calculatedPercentage = occupiedGuestRooms === null
       ? null
@@ -471,6 +542,29 @@ export async function POST(request: Request) {
         cell.border = { bottom: { style: "thin", color: { argb: "FFD9E1F2" } } };
       });
     });
+
+
+    if (roomInh instanceof File && descendants(parseXml(natXml, "ملف الجنسيات"), "G_C12").length > 0) {
+      const nationalityRooms = loadNationalityRoomRows(natXml, roomInhXml, manualArrivals);
+      const nationalitySheet = workbook.addWorksheet("جنسيات الغرف", { views: [{ rightToLeft: true, state: "frozen", ySplit: 1 }] });
+      nationalitySheet.addRow(["رقم الغرفة", "عدد الأفراد", "الجنسية", "تاريخ الوصول", "تاريخ المغادرة", "الشركة"]);
+      for (const row of nationalityRooms) nationalitySheet.addRow(row);
+      nationalitySheet.columns = [{ width: 16 }, { width: 16 }, { width: 18 }, { width: 18 }, { width: 18 }, { width: 30 }];
+      nationalitySheet.getRow(1).eachCell((cell) => {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + blue } };
+        cell.font = { name: "Arial", bold: true, color: { argb: "FFFFFFFF" }, size: 12 };
+        cell.alignment = { horizontal: "center" };
+      });
+      nationalitySheet.eachRow((row, rowNumber) => {
+        if (rowNumber === 1) return;
+        row.eachCell((cell) => {
+          cell.font = { name: "Arial", size: 11 };
+          cell.border = { bottom: { style: "thin", color: { argb: "FFD9E1F2" } } };
+          cell.alignment = { horizontal: "center" };
+        });
+      });
+      nationalitySheet.autoFilter = { from: "A1", to: "F" + Math.max(1, nationalitySheet.rowCount) };
+    }
 
     if (roomSummary) {
       const roomsSheet = workbook.addWorksheet("بيانات الغرف", { views: [{ rightToLeft: true, state: "frozen", ySplit: 1 }] });
