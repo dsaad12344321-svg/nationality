@@ -544,7 +544,7 @@ export async function POST(request: Request) {
     });
 
 
-    if (roomInh instanceof File && descendants(parseXml(natXml, "ملف الجنسيات"), "G_C12").length > 0) {
+    if (roomInh instanceof File && (descendants(parseXml(natXml, "ملف الجنسيات"), "G_C12").length > 0 || manualArrivals.length > 0)) {
       const nationalityRooms = loadNationalityRoomRows(natXml, roomInhXml, manualArrivals);
       const nationalitySheet = workbook.addWorksheet("جنسيات الغرف", { views: [{ rightToLeft: true, state: "frozen", ySplit: 1 }] });
       nationalitySheet.addRow(["رقم الغرفة", "عدد الأفراد", "الجنسية", "تاريخ الوصول", "تاريخ المغادرة", "الشركة"]);
