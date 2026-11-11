@@ -233,13 +233,26 @@ function loadNationalityRoomRows(
   }
 
   const rows: (string | number)[][] = [];
+  // الاستثناء يُخصم كعدد أشخاص من إجمالي الجنسية، ولا يحذف الجنسية بالكامل.
+  // نستهلك عدد الاستثناءات تدريجياً من سجلات الغرف ثم من السجلات اليدوية.
+  const exclusionRemaining = new Map<string, number>();
+  for (const item of exclusions) {
+    const code = String(item.code ?? "").trim().toUpperCase();
+    const count = Number(item.count);
+    if (TARGET_NATIONALITIES[code] && Number.isFinite(count) && count > 0) {
+      exclusionRemaining.set(code, (exclusionRemaining.get(code) ?? 0) + count);
+    }
+  }
+
   for (const record of descendants(guestRoot, "G_C12")) {
     const code = firstText(record, "C69").trim().toUpperCase();
     const nationality = TARGET_NATIONALITIES[code];
     if (!nationality) continue;
-    // إذا استُثنيت جنسية من التقرير الرئيسي، لا تظهر سجلاتها في تبويب جنسيات الغرف.
-    if (exclusions.some((item) => String(item.code).trim().toUpperCase() === code && Number(item.count) > 0)) continue;
-    const people = number(firstText(record, "C33")) + number(firstText(record, "C39"));
+    const originalPeople = number(firstText(record, "C33")) + number(firstText(record, "C39"));
+    if (originalPeople <= 0) continue;
+    const excluded = Math.min(originalPeople, exclusionRemaining.get(code) ?? 0);
+    const people = originalPeople - excluded;
+    exclusionRemaining.set(code, Math.max(0, (exclusionRemaining.get(code) ?? 0) - excluded));
     if (people <= 0) continue;
     const room = firstText(record, "C15").trim().padStart(4, "0");
     const matched = roomInfo.get(room);
@@ -256,8 +269,12 @@ function loadNationalityRoomRows(
   for (const item of manualArrivals) {
     const code = String(item.code ?? "").trim().toUpperCase();
     const nationality = TARGET_NATIONALITIES[code];
-    const count = Number(item.count);
-    if (!nationality || !Number.isInteger(count) || count <= 0) continue;
+    const originalCount = Number(item.count);
+    if (!nationality || !Number.isInteger(originalCount) || originalCount <= 0) continue;
+    const excluded = Math.min(originalCount, exclusionRemaining.get(code) ?? 0);
+    const count = originalCount - excluded;
+    exclusionRemaining.set(code, Math.max(0, (exclusionRemaining.get(code) ?? 0) - excluded));
+    if (count <= 0) continue;
     rows.push(["", count, nationality, String(item.arrivalDate ?? ""), String(item.departureDate ?? ""), ""]);
   }
   return rows;
