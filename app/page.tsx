@@ -461,7 +461,7 @@ export default function Home() {
         </ul>
       </section>
         </>
-      ) : (
+      ) : activeTool === "towels" ? (
         <section className="panel">
           <h2>Missing Towel Detector</h2>
           <p className="muted">ارفع التقريرين معًا: تقرير Towel Card لاستخراج الغرف ذات القيمة الفارغة، وتقرير Guests INH - By Room لاستبعاد الغرف التي تكون Company Name فيها مثل T- House use. تتم مطابقة أرقام الغرف تلقائيًا بصيغة 4 خانات، والفلترة لا تتأثر بحالة الأحرف.</p>
