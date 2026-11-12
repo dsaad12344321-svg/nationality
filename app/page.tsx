@@ -612,7 +612,7 @@ export default function Home() {
             <div className="towel-results">
               <div className="section-heading">
                 <h3>تفاصيل الحركات ({journalRows.length})</h3>
-                <button type="button" className="add-button" onClick={downloadJournalCsv}>تنزيل Excel / CSV</button>
+                <button type="button" className="add-button" onClick={downloadJournalCsv}>تنزيل CSV لفتحه في Excel</button>
               </div>
               <div className="table-wrap">
                 <table>
@@ -628,7 +628,7 @@ export default function Home() {
           )}
         </section>
       )}
-      <p className="foot">التقرير يُنشأ عند الطلب بصيغة Excel (.xlsx).</p>
+      <p className="foot">{activeTool === "journal" ? "يمكن تنزيل نتائج Journal Detector بصيغة CSV وفتحها مباشرة في Excel." : "التقرير يُنشأ عند الطلب بصيغة Excel (.xlsx)."}</p>
     </main>
   );
 }
