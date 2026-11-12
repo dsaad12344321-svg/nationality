@@ -77,7 +77,9 @@ export async function POST(request: Request) {
     for (const record of records) {
       if (firstText(record, "C69")) continue;
       const rawRoom = firstText(record, "C15");
-      if (!/^\\d+$/.test(rawRoom)) continue;
+      if (!/^\d+$/.test(rawRoom)) continue;
+      const people = Number(firstText(record, "C33") || 0) + Number(firstText(record, "C39") || 0);
+      if (!Number.isFinite(people) || people <= 0) continue;
       rooms.add(rawRoom.padStart(4, "0"));
       missingNationalityRecords++;
     }
