@@ -22,7 +22,7 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [kind, setKind] = useState<"error" | "success" | "info">("info");
-  const [activeTool, setActiveTool] = useState<"nationality" | "towels" | "nationality-missing">("nationality");
+  const [activeTool, setActiveTool] = useState<"nationality" | "towels" | "nationality-missing" | "journal">("nationality");
   const [towelFile, setTowelFile] = useState<File | null>(null);
   const [inhFile, setInhFile] = useState<File | null>(null);
   const [missingRooms, setMissingRooms] = useState<string[]>([]);
@@ -34,6 +34,11 @@ export default function Home() {
   const [nationalityMissingRooms, setNationalityMissingRooms] = useState<string[]>([]);
   const [nationalityMissingBusy, setNationalityMissingBusy] = useState(false);
   const [nationalityMissingMessage, setNationalityMissingMessage] = useState("");
+  const [journalFile, setJournalFile] = useState<File | null>(null);
+  const [journalRows, setJournalRows] = useState<{ code: string; description: string; room: string; guestName: string; debit: string; credit: string; date: string; time: string }[]>([]);
+  const [journalSummary, setJournalSummary] = useState<{ code: string; description: string; count: number }[]>([]);
+  const [journalBusy, setJournalBusy] = useState(false);
+  const [journalMessage, setJournalMessage] = useState("");
 
   useEffect(() => {
     try {
@@ -252,6 +257,42 @@ export default function Home() {
       setNationalityMissingMessage("تم نسخ " + nationalityMissingRooms.length + " رقم غرفة بصيغة comma separated.");
     } catch { setNationalityMissingMessage("تعذر النسخ تلقائيًا. يمكنك تحديد الأرقام في المربع ونسخها يدويًا."); }
   }
+
+  async function detectJournal() {
+    if (!journalFile) { setJournalMessage("من فضلك اختر تقرير Journal by Cashier and Transaction Code أولاً."); return; }
+    if (!journalFile.name.toLowerCase().endsWith(".xml")) { setJournalMessage("يجب أن يكون الملف بصيغة XML."); return; }
+    setJournalBusy(true);
+    setJournalMessage("جارٍ استخراج الحركات...");
+    setJournalRows([]);
+    setJournalSummary([]);
+    try {
+      const data = new FormData();
+      data.append("file", journalFile);
+      const response = await fetch("/api/journal-detector", { method: "POST", body: data });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "تعذر استخراج بيانات Journal.");
+      setJournalRows(result.rows || []);
+      setJournalSummary(result.summary || []);
+      setJournalMessage("اكتمل الاستخراج: " + result.count + " حركة من " + result.codesFound + " كود.");
+    } catch (error) {
+      setJournalMessage(error instanceof Error ? error.message : "حدث خطأ أثناء استخراج التقرير.");
+    } finally { setJournalBusy(false); }
+  }
+
+  function downloadJournalCsv() {
+    const headers = ["Transaction Code", "Transaction Description", "Room", "Guest Name", "Debit", "Credit", "Date", "Time"];
+    const values = journalRows.map((row) => [row.code, row.description, row.room, row.guestName, row.debit, row.credit, row.date, row.time]);
+    const csvCell = (value: string) => '"' + String(value ?? "").replace(/"/g, '""') + '"';
+    const csv = "\uFEFF" + [headers, ...values].map((line) => line.map(csvCell).join(",")).join("\r\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "journal-detector.csv";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
   async function generateReport() {
     if (!natFile || (!roomInhFile && !manFile)) {
       setKind("error");
@@ -313,16 +354,17 @@ export default function Home() {
     <main className="page">
       <header className="hero">
         <p className="eyebrow">أداة التقارير الفندقية</p>
-        <h1>{activeTool === "nationality" ? "التقرير اليومي للجنسيات" : activeTool === "towels" ? "Missing Towel Detector" : "Nationality missing detector"}</h1>
-        <p>{activeTool === "nationality" ? "حوّل ملفات nat.xml وman.xml إلى تقرير Excel، ويمكن إضافة Guests INH - By Room لإنشاء تبويب تفاصيل الغرف." : activeTool === "towels" ? "ارفع تقرير الغرف لاستخراج أرقام الغرف التي لا تحتوي على Towel Card." : "ارفع Guest INH By Nationality لاستخراج أرقام الغرف التي لا تحتوي على كود جنسية."}</p>
+        <h1>{activeTool === "nationality" ? "التقرير اليومي للجنسيات" : activeTool === "towels" ? "Missing Towel Detector" : activeTool === "nationality-missing" ? "Nationality missing detector" : "Journal Detector"}</h1>
+        <p>{activeTool === "nationality" ? "حوّل ملفات nat.xml وman.xml إلى تقرير Excel، ويمكن إضافة Guests INH - By Room لإنشاء تبويب تفاصيل الغرف." : activeTool === "towels" ? "ارفع تقرير الغرف لاستخراج أرقام الغرف التي لا تحتوي على Towel Card." : activeTool === "nationality-missing" ? "ارفع Guest INH By Nationality لاستخراج أرقام الغرف التي لا تحتوي على كود جنسية." : "ارفع Journal by Cashier and Transaction Code لاستخراج الغرفة واسم النزيل ومبالغ Debit وCredit للأكواد المحددة."}</p>
       </header>
 
       <section className="panel tool-picker">
         <label htmlFor="tool-select">اختر الأداة</label>
-        <select id="tool-select" value={activeTool} onChange={(e) => setActiveTool(e.target.value as "nationality" | "towels" | "nationality-missing")}>
+        <select id="tool-select" value={activeTool} onChange={(e) => setActiveTool(e.target.value as "nationality" | "towels" | "nationality-missing" | "journal")}>
           <option value="nationality">التقرير اليومي للجنسيات</option>
           <option value="towels">Missing Towel Detector</option>
           <option value="nationality-missing">Nationality missing detector</option>
+          <option value="journal">Journal Detector</option>
         </select>
       </section>
 
@@ -522,7 +564,7 @@ export default function Home() {
             {towelMismatches.length === 0 && towelMessage.startsWith("انتهى الفحص:") && <p className="saved-hint">لم يتم العثور على اختلافات في الأعداد.</p>}
           </div>
         </section>
-      ) : (
+      ) : activeTool === "nationality-missing" ? (
         <section className="panel">
           <h2>Nationality missing detector</h2>
           <p className="muted">ارفع تقرير Guest INH By Nationality. تفحص الأداة سجلات G_C12 وتحدد الغرف التي يكون فيها كود الجنسية C69 فارغًا، مع حذف التكرارات وترتيب أرقام الغرف تصاعديًا.</p>
@@ -541,6 +583,47 @@ export default function Home() {
               </div>
               <textarea readOnly value={nationalityMissingRooms.join(",")} rows={5} aria-label="أرقام الغرف بدون جنسية بصيغة comma separated" />
               <p className="saved-hint">الأرقام مرتبة تصاعديًا ومفصولة بفواصل، مع الاحتفاظ بصفر بداية رقم الغرفة.</p>
+            </div>
+          )}
+        </section>
+      ) : (
+        <section className="panel">
+          <h2>Journal Detector</h2>
+          <p className="muted">ارفع تقرير Journal by Cashier and Transaction Code بصيغة XML. ستُستخرج الأكواد التالية فقط: 1010, 1012, 1014, 1019, 1020, 1025, 4500, 4501, 5001, 5003, 5005, 5008, 5009, 5086. باقي الأكواد يتم تجاهلها.</p>
+          <div className="upload">
+            <label htmlFor="journal-file">تقرير Journal by Cashier and Transaction Code</label>
+            <input id="journal-file" type="file" accept=".xml,text/xml,application/xml" onChange={(e) => { setJournalFile(e.target.files?.[0] ?? null); setJournalRows([]); setJournalSummary([]); setJournalMessage(""); }} />
+            {journalFile && <div className="filename">تم الاختيار: {journalFile.name}</div>}
+          </div>
+          <button className="button" onClick={detectJournal} disabled={journalBusy || !journalFile}>{journalBusy ? "جارٍ الاستخراج..." : "استخراج بيانات الأكواد"}</button>
+          {journalMessage && <div role="status" className="notice">{journalMessage}</div>}
+          {journalSummary.length > 0 && (
+            <div className="towel-results">
+              <h3>ملخص الأكواد الموجودة ({journalSummary.length})</h3>
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>الكود</th><th>الوصف</th><th>عدد الحركات</th></tr></thead>
+                  <tbody>{journalSummary.map((item) => <tr key={item.code}><td>{item.code}</td><td>{item.description}</td><td>{item.count}</td></tr>)}</tbody>
+                </table>
+              </div>
+            </div>
+          )}
+          {journalRows.length > 0 && (
+            <div className="towel-results">
+              <div className="section-heading">
+                <h3>تفاصيل الحركات ({journalRows.length})</h3>
+                <button type="button" className="add-button" onClick={downloadJournalCsv}>تنزيل Excel / CSV</button>
+              </div>
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>الكود</th><th>الغرفة</th><th>اسم النزيل</th><th>Debit</th><th>Credit</th><th>التاريخ</th><th>الوقت</th></tr></thead>
+                  <tbody>
+                    {journalRows.map((row, index) => <tr key={row.code + "-" + row.room + "-" + index}>
+                      <td>{row.code}</td><td>{row.room}</td><td>{row.guestName}</td><td>{row.debit}</td><td>{row.credit}</td><td>{row.date}</td><td>{row.time}</td>
+                    </tr>)}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </section>
