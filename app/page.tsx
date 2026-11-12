@@ -22,7 +22,7 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [kind, setKind] = useState<"error" | "success" | "info">("info");
-  const [activeTool, setActiveTool] = useState<"nationality" | "towels">("nationality");
+  const [activeTool, setActiveTool] = useState<"nationality" | "towels" | "nationality-missing">("nationality");
   const [towelFile, setTowelFile] = useState<File | null>(null);
   const [inhFile, setInhFile] = useState<File | null>(null);
   const [missingRooms, setMissingRooms] = useState<string[]>([]);
@@ -30,6 +30,10 @@ export default function Home() {
   const [towelMismatches, setTowelMismatches] = useState<{ room: string; adults: number; children: number; expectedTowels: number; actualTowels: number }[]>([]);
   const [towelBusy, setTowelBusy] = useState(false);
   const [towelMessage, setTowelMessage] = useState("");
+  const [nationalityMissingFile, setNationalityMissingFile] = useState<File | null>(null);
+  const [nationalityMissingRooms, setNationalityMissingRooms] = useState<string[]>([]);
+  const [nationalityMissingBusy, setNationalityMissingBusy] = useState(false);
+  const [nationalityMissingMessage, setNationalityMissingMessage] = useState("");
 
   useEffect(() => {
     try {
@@ -223,6 +227,31 @@ export default function Home() {
     }
   }
 
+  async function detectMissingNationalities() {
+    if (!nationalityMissingFile) { setNationalityMissingMessage("من فضلك اختر تقرير Guest INH By Nationality أولاً."); return; }
+    if (!nationalityMissingFile.name.toLowerCase().endsWith(".xml")) { setNationalityMissingMessage("يجب أن يكون الملف بصيغة XML."); return; }
+    setNationalityMissingBusy(true);
+    setNationalityMissingMessage("جارٍ فحص الغرف التي لا تحتوي على كود جنسية...");
+    setNationalityMissingRooms([]);
+    try {
+      const data = new FormData();
+      data.append("file", nationalityMissingFile);
+      const response = await fetch("/api/nationality-missing", { method: "POST", body: data });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "تعذر فحص تقرير الجنسيات.");
+      setNationalityMissingRooms(result.rooms || []);
+      setNationalityMissingMessage(result.count ? "اكتمل الفحص: " + result.count + " غرفة بدون جنسية، من " + result.missingNationalityRecords + " سجل بدون كود جنسية." : "اكتمل الفحص: جميع سجلات الغرف تحتوي على كود جنسية.");
+    } catch (error) {
+      setNationalityMissingMessage(error instanceof Error ? error.message : "حدث خطأ أثناء فحص التقرير.");
+    } finally { setNationalityMissingBusy(false); }
+  }
+
+  async function copyNationalityMissingRooms() {
+    try {
+      await navigator.clipboard.writeText(nationalityMissingRooms.join(","));
+      setNationalityMissingMessage("تم نسخ " + nationalityMissingRooms.length + " رقم غرفة بصيغة comma separated.");
+    } catch { setNationalityMissingMessage("تعذر النسخ تلقائيًا. يمكنك تحديد الأرقام في المربع ونسخها يدويًا."); }
+  }
   async function generateReport() {
     if (!natFile || (!roomInhFile && !manFile)) {
       setKind("error");
@@ -284,15 +313,16 @@ export default function Home() {
     <main className="page">
       <header className="hero">
         <p className="eyebrow">أداة التقارير الفندقية</p>
-        <h1>{activeTool === "nationality" ? "التقرير اليومي للجنسيات" : "Missing Towel Detector"}</h1>
-        <p>{activeTool === "nationality" ? "حوّل ملفات nat.xml وman.xml إلى تقرير Excel، ويمكن إضافة Guests INH - By Room لإنشاء تبويب تفاصيل الغرف." : "ارفع تقرير الغرف لاستخراج أرقام الغرف التي لا تحتوي على Towel Card."}</p>
+        <h1>{activeTool === "nationality" ? "التقرير اليومي للجنسيات" : activeTool === "towels" ? "Missing Towel Detector" : "Nationality missing detector"}</h1>
+        <p>{activeTool === "nationality" ? "حوّل ملفات nat.xml وman.xml إلى تقرير Excel، ويمكن إضافة Guests INH - By Room لإنشاء تبويب تفاصيل الغرف." : activeTool === "towels" ? "ارفع تقرير الغرف لاستخراج أرقام الغرف التي لا تحتوي على Towel Card." : "ارفع Guest INH By Nationality لاستخراج أرقام الغرف التي لا تحتوي على كود جنسية."}</p>
       </header>
 
       <section className="panel tool-picker">
         <label htmlFor="tool-select">اختر الأداة</label>
-        <select id="tool-select" value={activeTool} onChange={(e) => setActiveTool(e.target.value as "nationality" | "towels")}>
+        <select id="tool-select" value={activeTool} onChange={(e) => setActiveTool(e.target.value as "nationality" | "towels" | "nationality-missing")}>
           <option value="nationality">التقرير اليومي للجنسيات</option>
           <option value="towels">Missing Towel Detector</option>
+          <option value="nationality-missing">Nationality missing detector</option>
         </select>
       </section>
 
@@ -491,6 +521,28 @@ export default function Home() {
             )}
             {towelMismatches.length === 0 && towelMessage.startsWith("انتهى الفحص:") && <p className="saved-hint">لم يتم العثور على اختلافات في الأعداد.</p>}
           </div>
+        </section>
+      ) : (
+        <section className="panel">
+          <h2>Nationality missing detector</h2>
+          <p className="muted">ارفع تقرير Guest INH By Nationality. تفحص الأداة سجلات G_C12 وتحدد الغرف التي يكون فيها كود الجنسية C69 فارغًا، مع حذف التكرارات وترتيب أرقام الغرف تصاعديًا.</p>
+          <div className="upload">
+            <label htmlFor="nationality-missing-file">تقرير الجنسيات — Guest INH By Nationality.xml</label>
+            <input id="nationality-missing-file" type="file" accept=".xml,text/xml,application/xml" onChange={(e) => { setNationalityMissingFile(e.target.files?.[0] ?? null); setNationalityMissingRooms([]); setNationalityMissingMessage(""); }} />
+            {nationalityMissingFile && <div className="filename">تم الاختيار: {nationalityMissingFile.name}</div>}
+          </div>
+          <button className="button" onClick={detectMissingNationalities} disabled={nationalityMissingBusy || !nationalityMissingFile}>{nationalityMissingBusy ? "جارٍ الفحص..." : "فحص الغرف بدون جنسية"}</button>
+          {nationalityMissingMessage && <div role="status" className="notice">{nationalityMissingMessage}</div>}
+          {nationalityMissingRooms.length > 0 && (
+            <div className="towel-results">
+              <div className="section-heading">
+                <h3>الغرف التي لا تحتوي على جنسية ({nationalityMissingRooms.length})</h3>
+                <button type="button" className="add-button" onClick={copyNationalityMissingRooms}>نسخ الأرقام</button>
+              </div>
+              <textarea readOnly value={nationalityMissingRooms.join(",")} rows={5} aria-label="أرقام الغرف بدون جنسية بصيغة comma separated" />
+              <p className="saved-hint">الأرقام مرتبة تصاعديًا ومفصولة بفواصل، مع الاحتفاظ بصفر بداية رقم الغرفة.</p>
+            </div>
+          )}
         </section>
       )}
       <p className="foot">التقرير يُنشأ عند الطلب بصيغة Excel (.xlsx).</p>
