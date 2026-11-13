@@ -39,6 +39,10 @@ export default function Home() {
   const [journalSummary, setJournalSummary] = useState<{ code: string; description: string; count: number }[]>([]);
   const [journalBusy, setJournalBusy] = useState(false);
   const [journalMessage, setJournalMessage] = useState("");
+  const [fixedChargeFile, setFixedChargeFile] = useState<File | null>(null);
+  const [fixedChargeRows, setFixedChargeRows] = useState<{ room: string; guestName: string; code: string; description: string; price: string; quantity: string; frequency: string; beginDate: string; endDate: string }[]>([]);
+  const [fixedChargeBusy, setFixedChargeBusy] = useState(false);
+  const [fixedChargeMessage, setFixedChargeMessage] = useState("");
 
   useEffect(() => {
     try {
@@ -288,6 +292,40 @@ export default function Home() {
     const link = document.createElement("a");
     link.href = url;
     link.download = "journal-detector.csv";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async function detectFixedCharges() {
+    if (!fixedChargeFile) { setFixedChargeMessage("من فضلك اختر تقرير الوصول RES_DETAIL أولاً."); return; }
+    if (!fixedChargeFile.name.toLowerCase().endsWith(".xml")) { setFixedChargeMessage("يجب أن يكون الملف بصيغة XML."); return; }
+    setFixedChargeBusy(true);
+    setFixedChargeMessage("جارٍ البحث عن 1012 Fixed Charges...");
+    setFixedChargeRows([]);
+    try {
+      const data = new FormData();
+      data.append("file", fixedChargeFile);
+      const response = await fetch("/api/journal-fixed-charges", { method: "POST", body: data });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "تعذر فحص تقرير الوصول.");
+      setFixedChargeRows(result.rows || []);
+      setFixedChargeMessage("تم فحص " + result.reservationsScanned + " سجل وصول. وُجد " + result.roomCount + " غرفة لديها 1012 Fixed Charges (" + result.count + " سجل رسوم).");
+    } catch (error) {
+      setFixedChargeMessage(error instanceof Error ? error.message : "حدث خطأ أثناء فحص تقرير الوصول.");
+    } finally { setFixedChargeBusy(false); }
+  }
+
+  function downloadFixedChargesCsv() {
+    const headers = ["Room", "Guest Name", "Transaction Code", "Description", "Price", "Quantity", "Frequency", "Begin Date", "End Date"];
+    const values = fixedChargeRows.map((row) => [row.room, row.guestName, row.code, row.description, row.price, row.quantity, row.frequency, row.beginDate, row.endDate]);
+    const csvCell = (value: string) => '"' + String(value ?? "").replace(/"/g, '""') + '"';
+    const csv = "\uFEFF" + [headers, ...values].map((line) => line.map(csvCell).join(",")).join("\r\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "fixed-charges-1012-rooms.csv";
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -638,6 +676,36 @@ export default function Home() {
               </div>
             </div>
           )}
+          <div style={{ borderTop: "2px solid #888", marginTop: 28, paddingTop: 20 }}>
+            <h3>استخراج غرف الوصول التي لديها 1012 Fixed Charges</h3>
+            <p className="muted">ارفع تقرير RES_DETAIL الذي يحتوي على سجلات غرف الوصول. ستعرض الأداة الغرف التي يوجد داخل قائمة Fixed Charges الخاصة بها كود الحركة 1012 فقط، وتتجاهل بقية الأكواد.</p>
+            <div className="upload">
+              <label htmlFor="fixed-charge-file">تقرير الوصول — RES_DETAIL.xml</label>
+              <input id="fixed-charge-file" type="file" accept=".xml,text/xml,application/xml" onChange={(e) => { setFixedChargeFile(e.target.files?.[0] ?? null); setFixedChargeRows([]); setFixedChargeMessage(""); }} />
+              {fixedChargeFile && <div className="filename">تم الاختيار: {fixedChargeFile.name}</div>}
+            </div>
+            <button className="button" onClick={detectFixedCharges} disabled={fixedChargeBusy || !fixedChargeFile}>{fixedChargeBusy ? "جارٍ الفحص..." : "استخراج غرف 1012 Fixed Charges"}</button>
+            {fixedChargeMessage && <div role="status" className="notice">{fixedChargeMessage}</div>}
+            {fixedChargeRows.length > 0 && (
+              <div className="towel-results">
+                <div className="section-heading">
+                  <h3>الغرف التي لديها 1012 Fixed Charges ({new Set(fixedChargeRows.map((row) => row.room)).size})</h3>
+                  <button type="button" className="add-button" onClick={downloadFixedChargesCsv}>تنزيل CSV لفتحه في Excel</button>
+                </div>
+                <textarea readOnly value={[...new Set(fixedChargeRows.map((row) => row.room))].join(",")} rows={2} aria-label="أرقام الغرف التي لديها 1012 Fixed Charges" />
+                <div dir="ltr" style={{ direction: "ltr", textAlign: "left" }}>
+                  <div className="table-wrap">
+                    <table dir="ltr" style={{ direction: "ltr", textAlign: "left" }}>
+                      <thead><tr><th>Room</th><th>Guest Name</th><th>Code</th><th>Description</th><th>Price</th><th>Frequency</th><th>Begin Date</th><th>End Date</th></tr></thead>
+                      <tbody>{fixedChargeRows.map((row, index) => <tr key={row.room + "-" + index}>
+                        <td>{row.room}</td><td>{row.guestName}</td><td>{row.code}</td><td>{row.description}</td><td>{row.price}</td><td>{row.frequency}</td><td>{row.beginDate}</td><td>{row.endDate}</td>
+                      </tr>)}</tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </section>
       )}
       <p className="foot">{activeTool === "journal" ? "يمكن تنزيل نتائج Journal Detector بصيغة CSV وفتحها مباشرة في Excel." : "التقرير يُنشأ عند الطلب بصيغة Excel (.xlsx)."}</p>
