@@ -614,15 +614,27 @@ export default function Home() {
                 <h3>تفاصيل الحركات ({journalRows.length})</h3>
                 <button type="button" className="add-button" onClick={downloadJournalCsv}>تنزيل CSV لفتحه في Excel</button>
               </div>
-              <div className="table-wrap">
-                <table>
-                  <thead><tr><th>الكود</th><th>الغرفة</th><th>اسم النزيل</th><th>Debit</th><th>Credit</th><th>التاريخ</th><th>الوقت</th></tr></thead>
-                  <tbody>
-                    {journalRows.map((row, index) => <tr key={row.code + "-" + row.room + "-" + index}>
-                      <td>{row.code}</td><td>{row.room}</td><td>{row.guestName}</td><td>{row.debit}</td><td>{row.credit}</td><td>{row.date}</td><td>{row.time}</td>
-                    </tr>)}
-                  </tbody>
-                </table>
+              <div dir="ltr" style={{ direction: "ltr", textAlign: "left" }}>
+                {journalSummary.map((group, groupIndex) => {
+                  const codeRows = journalRows.filter((row) => row.code === group.code);
+                  return (
+                    <section key={group.code} style={{ borderTop: groupIndex === 0 ? "2px solid #888" : "2px solid #888", paddingTop: 12, marginTop: 16 }}>
+                      <h3 style={{ direction: "ltr", textAlign: "left", marginBottom: 10 }}>
+                        Code: {group.code} {group.description ? "— " + group.description : ""} ({codeRows.length})
+                      </h3>
+                      <div className="table-wrap" style={{ direction: "ltr" }}>
+                        <table dir="ltr" style={{ direction: "ltr", textAlign: "left" }}>
+                          <thead><tr><th>Room</th><th>Guest Name</th><th>Debit</th><th>Credit</th><th>Date</th><th>Time</th></tr></thead>
+                          <tbody>
+                            {codeRows.map((row, index) => <tr key={row.code + "-" + row.room + "-" + index}>
+                              <td>{row.room}</td><td>{row.guestName}</td><td>{row.debit}</td><td>{row.credit}</td><td>{row.date}</td><td>{row.time}</td>
+                            </tr>)}
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+                  );
+                })}
               </div>
             </div>
           )}
