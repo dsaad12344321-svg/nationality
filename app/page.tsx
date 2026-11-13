@@ -393,7 +393,7 @@ export default function Home() {
       <header className="hero">
         <p className="eyebrow">أداة التقارير الفندقية</p>
         <h1>{activeTool === "nationality" ? "التقرير اليومي للجنسيات" : activeTool === "towels" ? "Missing Towel Detector" : activeTool === "nationality-missing" ? "Nationality missing detector" : "Journal Detector"}</h1>
-        <p>{activeTool === "nationality" ? "حوّل ملفات nat.xml وman.xml إلى تقرير Excel، ويمكن إضافة Guests INH - By Room لإنشاء تبويب تفاصيل الغرف." : activeTool === "towels" ? "ارفع تقرير الغرف لاستخراج أرقام الغرف التي لا تحتوي على Towel Card." : activeTool === "nationality-missing" ? "ارفع Guest INH By Nationality لاستخراج أرقام الغرف التي لا تحتوي على كود جنسية." : "ارفع Journal by Cashier and Transaction Code لاستخراج الغرفة واسم النزيل ومبالغ Debit وCredit للأكواد المحددة."}</p>
+        <p>{activeTool === "nationality" ? "حوّل ملفات nat.xml وman.xml إلى تقرير Excel، ويمكن إضافة Guests INH - By Room لإنشاء تبويب تفاصيل الغرف." : activeTool === "towels" ? "ارفع تقرير الغرف لاستخراج أرقام الغرف التي لا تحتوي على Towel Card." : activeTool === "nationality-missing" ? "ارفع Guest INH By Nationality لاستخراج أرقام الغرف التي لا تحتوي على كود جنسية." : "ارفع Journal by Cashier and Transaction Code لاستخراج الحركات، أو RES_DETAIL لاستخراج غرف الوصول التي لديها 1012 Fixed Charges."}</p>
       </header>
 
       <section className="panel tool-picker">
@@ -708,7 +708,7 @@ export default function Home() {
           </div>
         </section>
       )}
-      <p className="foot">{activeTool === "journal" ? "يمكن تنزيل نتائج Journal Detector بصيغة CSV وفتحها مباشرة في Excel." : "التقرير يُنشأ عند الطلب بصيغة Excel (.xlsx)."}</p>
+      <p className="foot">{activeTool === "journal" ? "يمكن تنزيل نتائج Journal Detector و1012 Fixed Charges بصيغة CSV وفتحها مباشرة في Excel." : "التقرير يُنشأ عند الطلب بصيغة Excel (.xlsx)."}</p>
     </main>
   );
 }
