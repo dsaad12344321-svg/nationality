@@ -22,7 +22,7 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [kind, setKind] = useState<"error" | "success" | "info">("info");
-  const [activeTool, setActiveTool] = useState<"nationality" | "towels" | "nationality-missing" | "journal">("nationality");
+  const [activeTool, setActiveTool] = useState<"nationality" | "towels" | "nationality-missing" | "missing-profile" | "journal">("nationality");
   const [towelFile, setTowelFile] = useState<File | null>(null);
   const [inhFile, setInhFile] = useState<File | null>(null);
   const [missingRooms, setMissingRooms] = useState<string[]>([]);
@@ -34,6 +34,11 @@ export default function Home() {
   const [nationalityMissingRooms, setNationalityMissingRooms] = useState<string[]>([]);
   const [nationalityMissingBusy, setNationalityMissingBusy] = useState(false);
   const [nationalityMissingMessage, setNationalityMissingMessage] = useState("");
+  const [profileFile, setProfileFile] = useState<File | null>(null);
+  const [profileRows, setProfileRows] = useState<{ room: string; mainName: string; accompanyingNames: string[]; names: string[]; adults: number; children: number; expected: number; found: number; difference: number; company: string; arrival: string; departure: string; status: "missing" | "extra" | "complete" }[]>([]);
+  const [profileSummary, setProfileSummary] = useState<{ totalRooms: number; checkedRooms: number; mismatchCount: number; missingCount: number; extraCount: number } | null>(null);
+  const [profileBusy, setProfileBusy] = useState(false);
+  const [profileMessage, setProfileMessage] = useState("");
   const [journalFile, setJournalFile] = useState<File | null>(null);
   const [journalRows, setJournalRows] = useState<{ code: string; description: string; room: string; guestName: string; debit: string; credit: string; date: string; time: string }[]>([]);
   const [journalSummary, setJournalSummary] = useState<{ code: string; description: string; count: number }[]>([]);
@@ -262,6 +267,35 @@ export default function Home() {
     } catch { setNationalityMissingMessage("تعذر النسخ تلقائيًا. يمكنك تحديد الأرقام في المربع ونسخها يدويًا."); }
   }
 
+
+  async function detectMissingProfiles() {
+    if (!profileFile) { setProfileMessage("من فضلك اختر تقرير Guests INH - By Room أولاً."); return; }
+    if (!profileFile.name.toLowerCase().endsWith(".xml")) { setProfileMessage("يجب أن يكون الملف بصيغة XML."); return; }
+    setProfileBusy(true);
+    setProfileMessage("جارٍ مقارنة عدد الأشخاص بالأسماء المسجلة...");
+    setProfileRows([]);
+    setProfileSummary(null);
+    try {
+      const data = new FormData();
+      data.append("file", profileFile);
+      const response = await fetch("/api/missing-profile", { method: "POST", body: data });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "تعذر فحص تقرير الغرف.");
+      setProfileRows(result.rows || []);
+      setProfileSummary({ totalRooms: result.totalRooms, checkedRooms: result.checkedRooms, mismatchCount: result.mismatchCount, missingCount: result.missingCount, extraCount: result.extraCount });
+      setProfileMessage("اكتمل الفحص: تمت مراجعة " + result.checkedRooms + " غرفة. توجد " + result.mismatchCount + " غرفة تحتاج إلى مراجعة (" + result.missingCount + " ناقص، " + result.extraCount + " زيادة).");
+    } catch (error) {
+      setProfileMessage(error instanceof Error ? error.message : "حدث خطأ أثناء فحص التقرير.");
+    } finally { setProfileBusy(false); }
+  }
+
+  async function copyProfileRooms() {
+    try {
+      await navigator.clipboard.writeText(profileRows.map((row) => row.room).join(","));
+      setProfileMessage("تم نسخ " + profileRows.length + " رقم غرفة.");
+    } catch { setProfileMessage("تعذر النسخ تلقائيًا. يمكنك تحديد الأرقام ونسخها يدويًا."); }
+  }
+
   async function detectJournal() {
     if (!journalFile) { setJournalMessage("من فضلك اختر تقرير Journal by Cashier and Transaction Code أولاً."); return; }
     if (!journalFile.name.toLowerCase().endsWith(".xml")) { setJournalMessage("يجب أن يكون الملف بصيغة XML."); return; }
@@ -392,16 +426,16 @@ export default function Home() {
     <main className="page">
       <header className="hero">
         <p className="eyebrow">أداة التقارير الفندقية</p>
-        <h1>{activeTool === "nationality" ? "التقرير اليومي للجنسيات" : activeTool === "towels" ? "Missing Towel Detector" : activeTool === "nationality-missing" ? "Nationality missing detector" : "Journal Detector"}</h1>
-        <p>{activeTool === "nationality" ? "حوّل ملفات nat.xml وman.xml إلى تقرير Excel، ويمكن إضافة Guests INH - By Room لإنشاء تبويب تفاصيل الغرف." : activeTool === "towels" ? "ارفع تقرير الغرف لاستخراج أرقام الغرف التي لا تحتوي على Towel Card." : activeTool === "nationality-missing" ? "ارفع Guest INH By Nationality لاستخراج أرقام الغرف التي لا تحتوي على كود جنسية." : "ارفع Journal by Cashier and Transaction Code لاستخراج الحركات، أو RES_DETAIL لاستخراج غرف الوصول التي لديها 1012 Fixed Charges."}</p>
+        <h1>{activeTool === "nationality" ? "التقرير اليومي للجنسيات" : activeTool === "towels" ? "Missing Towel Detector" : activeTool === "nationality-missing" ? "Nationality missing detector" : activeTool === "missing-profile" ? "Missing Profile Detector" : "Journal Detector"}</h1>
+        <p>{activeTool === "nationality" ? "حوّل ملفات nat.xml وman.xml إلى تقرير Excel، ويمكن إضافة Guests INH - By Room لإنشاء تبويب تفاصيل الغرف." : activeTool === "towels" ? "ارفع تقرير الغرف لاستخراج أرقام الغرف التي لا تحتوي على Towel Card." : activeTool === "nationality-missing" ? "ارفع Guest INH By Nationality لاستخراج أرقام الغرف التي لا تحتوي على كود جنسية." : activeTool === "missing-profile" ? "قارن عدد Adults + Children بعدد الأسماء المسجلة في Main Profile وAccompanying Names." : "ارفع Journal by Cashier and Transaction Code لاستخراج الحركات، أو RES_DETAIL لاستخراج غرف الوصول التي لديها 1012 Fixed Charges."}</p>
       </header>
 
       <section className="panel tool-picker">
         <label htmlFor="tool-select">اختر الأداة</label>
-        <select id="tool-select" value={activeTool} onChange={(e) => setActiveTool(e.target.value as "nationality" | "towels" | "nationality-missing" | "journal")}>
+        <select id="tool-select" value={activeTool} onChange={(e) => setActiveTool(e.target.value as "nationality" | "towels" | "nationality-missing" | "missing-profile" | "journal")}>
           <option value="nationality">التقرير اليومي للجنسيات</option>
           <option value="towels">Missing Towel Detector</option>
-          <option value="nationality-missing">Nationality missing detector</option>
+          <option value="nationality-missing">Nationality missing detector</option>\n          <option value="missing-profile">Missing Profile Detector</option>
           <option value="journal">Journal Detector</option>
         </select>
       </section>
@@ -601,6 +635,59 @@ export default function Home() {
             )}
             {towelMismatches.length === 0 && towelMessage.startsWith("انتهى الفحص:") && <p className="saved-hint">لم يتم العثور على اختلافات في الأعداد.</p>}
           </div>
+        </section>
+
+      ) : activeTool === "missing-profile" ? (
+        <section className="panel">
+          <h2>Missing Profile Detector</h2>
+          <p className="muted">ترفع تقرير Guests INH - By Room. تحسب الأداة العدد المتوقع من Adults + Children، ثم تقارنه بعدد الأسماء: Main Profile واحد إذا كان موجودًا، بالإضافة إلى الأسماء داخل Accompanying Names المفصولة بعلامة /.</p>
+          <div className="upload">
+            <label htmlFor="missing-profile-file">تقرير الغرف — Guests INH - By Room.xml</label>
+            <input id="missing-profile-file" type="file" accept=".xml,text/xml,application/xml" onChange={(e) => { setProfileFile(e.target.files?.[0] ?? null); setProfileRows([]); setProfileSummary(null); setProfileMessage(""); }} />
+            {profileFile && <div className="filename">تم الاختيار: {profileFile.name}</div>}
+          </div>
+          <button className="button" onClick={detectMissingProfiles} disabled={profileBusy || !profileFile}>{profileBusy ? "جارٍ الفحص..." : "فحص ملفات النزلاء"}</button>
+          {profileMessage && <div role="status" className="notice">{profileMessage}</div>}
+          {profileSummary && (
+            <div className="towel-results">
+              <div className="section-heading">
+                <h3>ملخص الفحص</h3>
+                <button type="button" className="add-button" onClick={copyProfileRooms} disabled={profileRows.length === 0}>نسخ أرقام الغرف</button>
+              </div>
+              <div className="stats-grid">
+                <div><strong>{profileSummary.checkedRooms}</strong><span>إجمالي الغرف المفحوصة</span></div>
+                <div><strong>{profileSummary.mismatchCount}</strong><span>غرف تحتاج مراجعة</span></div>
+                <div><strong>{profileSummary.missingCount}</strong><span>أسماء ناقصة</span></div>
+                <div><strong>{profileSummary.extraCount}</strong><span>أسماء زائدة</span></div>
+              </div>
+            </div>
+          )}
+          {profileRows.length > 0 && (
+            <div className="towel-results">
+              <h3>الغرف التي تحتاج إلى مراجعة ({profileRows.length})</h3>
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>الغرفة</th><th>Adults</th><th>Children</th><th>المتوقع</th><th>الأسماء الموجودة</th><th>المسجل</th><th>الفرق</th><th>الشركة</th></tr></thead>
+                  <tbody>
+                    {profileRows.map((row) => (
+                      <tr key={row.room}>
+                        <td>{row.room}</td><td>{row.adults}</td><td>{row.children}</td><td>{row.expected}</td>
+                        <td style={{ minWidth: 260, whiteSpace: "normal" }}>
+                          {row.mainName && <div><strong>Main:</strong> {row.mainName}</div>}
+                          {row.accompanyingNames.length > 0 && <div><strong>Accompanying:</strong> {row.accompanyingNames.join(" / ")}</div>}
+                          {!row.names.length && <span>لا توجد أسماء مسجلة</span>}
+                        </td>
+                        <td>{row.found}</td>
+                        <td>{row.status === "missing" ? "ناقص " + row.difference : "زائد " + Math.abs(row.difference)}</td>
+                        <td>{row.company}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="saved-hint">يتم احتساب Main Profile كاسم واحد، وكل اسم داخل Accompanying Names بعد الفصل بعلامة / كشخص مستقل. الأداة تحدد عدد الأسماء الناقصة ولا تخمّن أسماء أشخاص غير موجودة في التقرير.</p>
+            </div>
+          )}
         </section>
       ) : activeTool === "nationality-missing" ? (
         <section className="panel">
