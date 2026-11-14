@@ -42,7 +42,7 @@ export default function Home() {
   const [profileShowNames, setProfileShowNames] = useState(false);
   const [profileHideHouseUse, setProfileHideHouseUse] = useState(true);
   const [profileSelectedCompanies, setProfileSelectedCompanies] = useState<string[]>([]);
-  const [profileVisibleColumns, setProfileVisibleColumns] = useState<string[]>(["room","adults","children","expected","found","difference","company"]);
+  const [profileVisibleColumns, setProfileVisibleColumns] = useState<string[]>(["room","adults","children","expected","found","difference","company","arrival","departure","names"]);
   const [journalFile, setJournalFile] = useState<File | null>(null);
   const [journalRows, setJournalRows] = useState<{ code: string; description: string; room: string; guestName: string; debit: string; credit: string; date: string; time: string }[]>([]);
   const [journalSummary, setJournalSummary] = useState<{ code: string; description: string; count: number }[]>([]);
