@@ -41,6 +41,7 @@ export default function Home() {
   const [profileMessage, setProfileMessage] = useState("");
   const [profileShowNames, setProfileShowNames] = useState(false);
   const [profileHideHouseUse, setProfileHideHouseUse] = useState(true);
+  const [profileDifferenceFilter, setProfileDifferenceFilter] = useState<"all" | "missing" | "extra">("all");
   const [profileSelectedCompanies, setProfileSelectedCompanies] = useState<string[]>([]);
   const [profileVisibleColumns, setProfileVisibleColumns] = useState<string[]>(["room","adults","children","expected","found","difference","company","arrival","departure","names"]);
   const [journalFile, setJournalFile] = useState<File | null>(null);
@@ -669,6 +670,8 @@ export default function Home() {
               const isHouseUse = /house\\s*use/i.test(row.company);
               if (profileHideHouseUse && isHouseUse) return false;
               if (profileSelectedCompanies.length > 0 && !profileSelectedCompanies.includes(row.company)) return false;
+              if (profileDifferenceFilter === "missing" && row.status !== "missing") return false;
+              if (profileDifferenceFilter === "extra" && row.status !== "extra") return false;
               return true;
             });
             const columns: [string,string][] = [["room","الغرفة"],["adults","Adults"],["children","Children"],["expected","المتوقع"],["found","المسجل"],["difference","الفرق"],["company","الشركة"],["arrival","الوصول"],["departure","المغادرة"],["names","الأسماء"]];
@@ -686,6 +689,23 @@ export default function Home() {
                     <input type="checkbox" checked={profileHideHouseUse} onChange={(e)=>setProfileHideHouseUse(e.target.checked)} />
                     إخفاء غرف House Use
                   </label>
+                  <div style={{marginBottom:12}}>
+                    <strong>نوع الفرق</strong>
+                    <div className="uploads" style={{marginTop:8}}>
+                      <label style={{display:"inline-flex",alignItems:"center",gap:6}}>
+                        <input type="radio" name="profile-difference-filter" checked={profileDifferenceFilter==="all"} onChange={()=>setProfileDifferenceFilter("all")} />
+                        عرض الناقص والزائد
+                      </label>
+                      <label style={{display:"inline-flex",alignItems:"center",gap:6}}>
+                        <input type="radio" name="profile-difference-filter" checked={profileDifferenceFilter==="missing"} onChange={()=>setProfileDifferenceFilter("missing")} />
+                        المتوقع أكبر من المسجل (أسماء ناقصة)
+                      </label>
+                      <label style={{display:"inline-flex",alignItems:"center",gap:6}}>
+                        <input type="radio" name="profile-difference-filter" checked={profileDifferenceFilter==="extra"} onChange={()=>setProfileDifferenceFilter("extra")} />
+                        المسجل أكبر من المتوقع (أسماء زائدة)
+                      </label>
+                    </div>
+                  </div>
                   <div style={{marginBottom:12}}>
                     <strong>الأعمدة الظاهرة</strong>
                     <div className="uploads" style={{marginTop:8}}>
