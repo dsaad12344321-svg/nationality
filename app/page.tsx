@@ -679,6 +679,7 @@ export default function Home() {
             return (
               <div className="towel-results">
                 <h3>الغرف التي تحتاج إلى مراجعة ({filteredRows.length} من {profileRows.length})</h3>
+                <button type="button" className="add-button" disabled={filteredRows.length===0} onClick={async()=>{try{await navigator.clipboard.writeText(filteredRows.map((row)=>row.room).join(","));setProfileMessage("تم نسخ "+filteredRows.length+" رقم غرفة ظاهرة بعد تطبيق الفلاتر.");}catch{setProfileMessage("تعذر النسخ تلقائياً. حاول استخدام اتصال آمن أو نسخ الأرقام يدوياً.");}}}>نسخ أرقام الغرف الظاهرة (,)</button>
                 <div className="panel" style={{ marginBottom: 16 }}>
                   <h3>فلاتر العرض</h3>
                   <label style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
