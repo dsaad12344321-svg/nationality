@@ -39,6 +39,10 @@ export default function Home() {
   const [profileSummary, setProfileSummary] = useState<{ totalRooms: number; checkedRooms: number; mismatchCount: number; missingCount: number; extraCount: number } | null>(null);
   const [profileBusy, setProfileBusy] = useState(false);
   const [profileMessage, setProfileMessage] = useState("");
+  const [profileShowNames, setProfileShowNames] = useState(false);
+  const [profileHideHouseUse, setProfileHideHouseUse] = useState(true);
+  const [profileSelectedCompanies, setProfileSelectedCompanies] = useState<string[]>([]);
+  const [profileVisibleColumns, setProfileVisibleColumns] = useState<string[]>(["room","adults","children","expected","found","difference","company"]);
   const [journalFile, setJournalFile] = useState<File | null>(null);
   const [journalRows, setJournalRows] = useState<{ code: string; description: string; room: string; guestName: string; debit: string; credit: string; date: string; time: string }[]>([]);
   const [journalSummary, setJournalSummary] = useState<{ code: string; description: string; count: number }[]>([]);
@@ -640,20 +644,17 @@ export default function Home() {
       ) : activeTool === "missing-profile" ? (
         <section className="panel">
           <h2>Missing Profile Detector</h2>
-          <p className="muted">ترفع تقرير Guests INH - By Room. تحسب الأداة العدد المتوقع من Adults + Children، ثم تقارنه بعدد الأسماء: Main Profile واحد إذا كان موجودًا، بالإضافة إلى الأسماء داخل Accompanying Names المفصولة بعلامة /.</p>
+          <p className="muted">قارن عدد Adults + Children بعدد الأسماء المسجلة في Main Profile وAccompanying Names.</p>
           <div className="upload">
             <label htmlFor="missing-profile-file">تقرير الغرف — Guests INH - By Room.xml</label>
-            <input id="missing-profile-file" type="file" accept=".xml,text/xml,application/xml" onChange={(e) => { setProfileFile(e.target.files?.[0] ?? null); setProfileRows([]); setProfileSummary(null); setProfileMessage(""); }} />
+            <input id="missing-profile-file" type="file" accept=".xml,text/xml,application/xml" onChange={(e) => { setProfileFile(e.target.files?.[0] ?? null); setProfileRows([]); setProfileSummary(null); setProfileMessage(""); setProfileSelectedCompanies([]); }} />
             {profileFile && <div className="filename">تم الاختيار: {profileFile.name}</div>}
           </div>
           <button className="button" onClick={detectMissingProfiles} disabled={profileBusy || !profileFile}>{profileBusy ? "جارٍ الفحص..." : "فحص ملفات النزلاء"}</button>
           {profileMessage && <div role="status" className="notice">{profileMessage}</div>}
           {profileSummary && (
             <div className="towel-results">
-              <div className="section-heading">
-                <h3>ملخص الفحص</h3>
-                <button type="button" className="add-button" onClick={copyProfileRooms} disabled={profileRows.length === 0}>نسخ أرقام الغرف</button>
-              </div>
+              <div className="section-heading"><h3>ملخص الفحص</h3><button type="button" className="add-button" onClick={copyProfileRooms} disabled={profileRows.length === 0}>نسخ أرقام الغرف المعروضة</button></div>
               <div className="stats-grid">
                 <div><strong>{profileSummary.checkedRooms}</strong><span>إجمالي الغرف المفحوصة</span></div>
                 <div><strong>{profileSummary.mismatchCount}</strong><span>غرف تحتاج مراجعة</span></div>
@@ -662,32 +663,75 @@ export default function Home() {
               </div>
             </div>
           )}
-          {profileRows.length > 0 && (
-            <div className="towel-results">
-              <h3>الغرف التي تحتاج إلى مراجعة ({profileRows.length})</h3>
-              <div className="table-wrap">
-                <table>
-                  <thead><tr><th>الغرفة</th><th>Adults</th><th>Children</th><th>المتوقع</th><th>الأسماء الموجودة</th><th>المسجل</th><th>الفرق</th><th>الشركة</th></tr></thead>
-                  <tbody>
-                    {profileRows.map((row) => (
-                      <tr key={row.room}>
-                        <td>{row.room}</td><td>{row.adults}</td><td>{row.children}</td><td>{row.expected}</td>
-                        <td style={{ minWidth: 260, whiteSpace: "normal" }}>
-                          {row.mainName && <div><strong>Main:</strong> {row.mainName}</div>}
-                          {row.accompanyingNames.length > 0 && <div><strong>Accompanying:</strong> {row.accompanyingNames.join(" / ")}</div>}
-                          {!row.names.length && <span>لا توجد أسماء مسجلة</span>}
-                        </td>
-                        <td>{row.found}</td>
-                        <td>{row.status === "missing" ? "ناقص " + row.difference : "زائد " + Math.abs(row.difference)}</td>
-                        <td>{row.company}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+          {profileRows.length > 0 && (() => {
+            const companies = Array.from(new Set(profileRows.map((row) => row.company).filter(Boolean))).sort();
+            const filteredRows = profileRows.filter((row) => {
+              const isHouseUse = /house\\s*use/i.test(row.company);
+              if (profileHideHouseUse && isHouseUse) return false;
+              if (profileSelectedCompanies.length > 0 && !profileSelectedCompanies.includes(row.company)) return false;
+              return true;
+            });
+            const columns: [string,string][] = [["room","الغرفة"],["adults","Adults"],["children","Children"],["expected","المتوقع"],["found","المسجل"],["difference","الفرق"],["company","الشركة"],["arrival","الوصول"],["departure","المغادرة"],["names","الأسماء"]];
+            const showColumn = (key: string) => profileVisibleColumns.includes(key) && (key !== "names" || profileShowNames);
+            return (
+              <div className="towel-results">
+                <h3>الغرف التي تحتاج إلى مراجعة ({filteredRows.length} من {profileRows.length})</h3>
+                <div className="panel" style={{ marginBottom: 16 }}>
+                  <h3>فلاتر العرض</h3>
+                  <label style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                    <input type="checkbox" checked={profileShowNames} onChange={(e)=>setProfileShowNames(e.target.checked)} />
+                    إظهار أسماء النزلاء (مخفية افتراضياً)
+                  </label>
+                  <label style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                    <input type="checkbox" checked={profileHideHouseUse} onChange={(e)=>setProfileHideHouseUse(e.target.checked)} />
+                    إخفاء غرف House Use
+                  </label>
+                  <div style={{marginBottom:12}}>
+                    <strong>الأعمدة الظاهرة</strong>
+                    <div className="uploads" style={{marginTop:8}}>
+                      {columns.map(([key,label]) => <label key={key} style={{display:"inline-flex",alignItems:"center",gap:6}}>
+                        <input type="checkbox" checked={showColumn(key)} disabled={key==="names" && !profileShowNames} onChange={(e)=>setProfileVisibleColumns((prev)=>e.target.checked?[...prev,key]:prev.filter((x)=>x!==key))} />
+                        {label}
+                      </label>)}
+                    </div>
+                  </div>
+                  <div>
+                    <strong>الشركات</strong>
+                    <p className="saved-hint">اترك جميع الشركات بدون تحديد لعرض الكل، أو اختر شركة واحدة أو أكثر لتصفية النتائج.</p>
+                    <div className="uploads">
+                      {companies.map((company) => <label key={company} style={{display:"inline-flex",alignItems:"center",gap:6}}>
+                        <input type="checkbox" checked={profileSelectedCompanies.includes(company)} onChange={(e)=>setProfileSelectedCompanies((prev)=>e.target.checked?[...prev,company]:prev.filter((x)=>x!==company))} />
+                        {company}
+                      </label>)}
+                    </div>
+                    {profileSelectedCompanies.length>0 && <button type="button" className="add-button" onClick={()=>setProfileSelectedCompanies([])}>عرض كل الشركات</button>}
+                  </div>
+                </div>
+                {filteredRows.length === 0 ? <p className="empty-exclusions">لا توجد غرف تطابق الفلاتر الحالية.</p> : (
+                  <div className="table-wrap"><table>
+                    <thead><tr>{columns.filter(([key])=>showColumn(key)).map(([key,label])=><th key={key}>{label}</th>)}</tr></thead>
+                    <tbody>{filteredRows.map((row)=><tr key={row.room}>
+                      {showColumn("room")&&<td>{row.room}</td>}
+                      {showColumn("adults")&&<td>{row.adults}</td>}
+                      {showColumn("children")&&<td>{row.children}</td>}
+                      {showColumn("expected")&&<td>{row.expected}</td>}
+                      {showColumn("found")&&<td>{row.found}</td>}
+                      {showColumn("difference")&&<td>{row.status==="missing"?"ناقص "+row.difference:"زائد "+Math.abs(row.difference)}</td>}
+                      {showColumn("company")&&<td>{row.company}</td>}
+                      {showColumn("arrival")&&<td>{row.arrival}</td>}
+                      {showColumn("departure")&&<td>{row.departure}</td>}
+                      {showColumn("names")&&<td style={{minWidth:260,whiteSpace:"normal"}}>
+                        {row.mainName&&<div><strong>Main:</strong> {row.mainName}</div>}
+                        {row.accompanyingNames.length>0&&<div><strong>Accompanying:</strong> {row.accompanyingNames.join(" / ")}</div>}
+                        {!row.names.length&&<span>لا توجد أسماء مسجلة</span>}
+                      </td>}
+                    </tr>)}</tbody>
+                  </table></div>
+                )}
+                <p className="saved-hint">Main Profile يُحسب اسماً واحداً، وكل اسم في Accompanying Names بعد الفصل بعلامة / يُحسب شخصاً مستقلاً.</p>
               </div>
-              <p className="saved-hint">يتم احتساب Main Profile كاسم واحد، وكل اسم داخل Accompanying Names بعد الفصل بعلامة / كشخص مستقل. الأداة تحدد عدد الأسماء الناقصة ولا تخمّن أسماء أشخاص غير موجودة في التقرير.</p>
-            </div>
-          )}
+            );
+          })()}
         </section>
       ) : activeTool === "nationality-missing" ? (
         <section className="panel">
