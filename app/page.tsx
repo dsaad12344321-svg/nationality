@@ -238,7 +238,7 @@ export default function Home() {
       if (!response.ok) throw new Error(result.error || "تعذر فحص تطابق الأعداد.");
       setTowelMismatches(result.mismatches || []);
       setExcludedRooms(result.excludedRooms || []);
-      setTowelMessage(`انتهى الفحص: ${result.count} غرفة بها اختلاف في العدد، وتم تجاهل ${result.excludedCount || 0} غرفة تابعة لـ House use.`);
+      setTowelMessage(`انتهى الفحص: ${result.count} غرفة بها اختلاف في العدد، ويشمل الفحص ${result.houseUseCount || 0} غرفة تابعة لـ House use.`);
     } catch (error) {
       setTowelMessage(error instanceof Error ? error.message : "حدث خطأ أثناء مراجعة أعداد المناشف.");
     } finally {
@@ -617,7 +617,7 @@ export default function Home() {
 
           <div className="towel-results">
             <h3>أداة فرعية: مراجعة تطابق عدد النزلاء مع Towel Card</h3>
-            <p className="muted">تراجع كل غرفة وفق القاعدة: Adults + Children = Towel Card. مثال: 2 بالغين + 2 أطفال يجب أن يكون Towel Card = 4. يتم استبعاد غرف House use تلقائيًا، كما يتم تجاهل قيمة Towel Card الفارغة لأنها تظهر في نتيجة الأداة الأصلية.</p>
+            <p className="muted">تراجع كل غرفة، بما في ذلك غرف House use، وفق القاعدة: Adults + Children = Towel Card. مثال: 2 بالغين + 2 أطفال يجب أن يكون Towel Card = 4. يتم تجاهل قيمة Towel Card الفارغة لأنها تظهر في نتيجة أداة الغرف التي لا تحتوي على كارت.</p>
             <button type="button" className="button" onClick={checkTowelCounts} disabled={towelBusy || !towelFile || !inhFile}>{towelBusy ? "جارٍ الفحص..." : "فحص أخطاء عدد Towel Card"}</button>
             {towelMismatches.length > 0 && (
               <>
