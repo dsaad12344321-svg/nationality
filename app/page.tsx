@@ -617,7 +617,7 @@ export default function Home() {
 
           <div className="towel-results">
             <h3>أداة فرعية: مراجعة تطابق عدد النزلاء مع Towel Card</h3>
-            <p className="muted">تراجع كل غرفة، بما في ذلك غرف House use، وفق القاعدة: Adults + Children = Towel Card. مثال: 2 بالغين + 2 أطفال يجب أن يكون Towel Card = 4. يتم تجاهل قيمة Towel Card الفارغة لأنها تظهر في نتيجة أداة الغرف التي لا تحتوي على كارت.</p>
+            <p className="muted">يشمل الفحص غرف النزلاء وHouse use. غرف House use التي تكون قيمة Towel Card فيها فارغة تُعتبر طبيعية ولا تظهر كمخالفة، أما إذا كانت لها قيمة فيتم فحصها ومقارنتها بقاعدة Adults + Children = Towel Card. مثال: 2 بالغين + 2 أطفال يجب أن يكون Towel Card = 4.</p>
             <button type="button" className="button" onClick={checkTowelCounts} disabled={towelBusy || !towelFile || !inhFile}>{towelBusy ? "جارٍ الفحص..." : "فحص أخطاء عدد Towel Card"}</button>
             {towelMismatches.length > 0 && (
               <>
