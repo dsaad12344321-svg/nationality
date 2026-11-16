@@ -84,9 +84,14 @@ def normalize(value):
 
 def name_tokens(name):
     # Oracle descriptions commonly use "Surname, Given names".
-    bits = [normalize(part) for part in name.split(",")]
-    tokens = [token for bit in bits for token in bit.split()]
-    return list(dict.fromkeys(tokens))
+    if "," in name:
+        surname, given = name.split(",", 1)
+        surname_tokens = normalize(surname).split()
+        given_tokens = normalize(given).split()
+        # Require the last surname token and first given-name token.
+        return [surname_tokens[-1], given_tokens[0]] if surname_tokens and given_tokens else []
+    tokens = normalize(name).split()
+    return [tokens[0], tokens[-1]] if len(tokens) >= 2 else tokens
 
 def extract_text(path):
     suffix = path.suffix.lower()
@@ -203,7 +208,13 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", self.headers.get("Origin", "*"))
+        origin = self.headers.get("Origin", "")
+        allowed = {item.strip() for item in os.environ.get(
+            "USER_ACTIVITY_ALLOWED_ORIGINS",
+            "https://nationality.vercel.app,http://localhost:3000,http://127.0.0.1:3000"
+        ).split(",") if item.strip()}
+        if origin in allowed:
+            self.send_header("Access-Control-Allow-Origin", origin)
         self.send_header("Vary", "Origin")
         self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
