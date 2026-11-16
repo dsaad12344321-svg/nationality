@@ -108,6 +108,8 @@ export async function POST(request: Request) {
         .filter((row) => {
           const room = row.room.padStart(4, "0");
           if (row.towel === "") return false;
+          // House Use: any non-empty Towel Card value is an error, regardless of its number.
+          if (houseUseRooms.has(room)) return true;
           if (!/^\d+$/.test(row.adults) || !/^\d+$/.test(row.children) || !/^\d+$/.test(row.towel)) return false;
           return Number(row.adults) + Number(row.children) !== Number(row.towel);
         })
@@ -117,6 +119,7 @@ export async function POST(request: Request) {
           children: Number(row.children),
           expectedTowels: Number(row.adults) + Number(row.children),
           actualTowels: Number(row.towel),
+          isHouseUse: houseUseRooms.has(row.room.padStart(4, "0")),
         }))
         .sort((a, b) => Number(a.room) - Number(b.room));
 
