@@ -435,8 +435,6 @@ export default function Home() {
         <p>{activeTool === "nationality" ? "حوّل ملفات nat.xml وman.xml إلى تقرير Excel، ويمكن إضافة Guests INH - By Room لإنشاء تبويب تفاصيل الغرف." : activeTool === "towels" ? "ارفع تقرير الغرف لاستخراج أرقام الغرف التي لا تحتوي على Towel Card." : activeTool === "nationality-missing" ? "ارفع Guest INH By Nationality لاستخراج أرقام الغرف التي لا تحتوي على كود جنسية." : activeTool === "missing-profile" ? "قارن عدد Adults + Children بعدد الأسماء المسجلة في Main Profile وAccompanying Names." : "ارفع Journal by Cashier and Transaction Code لاستخراج الحركات، أو RES_DETAIL لاستخراج غرف الوصول التي لديها 1012 Fixed Charges."}</p>
       </header>
 
-      <section className="panel" style={{ marginBottom: 14 }}><a href="/user-activity-log" style={{ display: "block", padding: "13px 16px", borderRadius: 10, background: "#e8f2fb", color: "#1769aa", fontWeight: 700, textDecoration: "none", textAlign: "center" }}>فتح أداة User Activity Log ←</a></section>
-
       <section className="panel tool-picker">
         <label htmlFor="tool-select">اختر الأداة</label>
         <select id="tool-select" value={activeTool} onChange={(e) => setActiveTool(e.target.value as "nationality" | "towels" | "nationality-missing" | "missing-profile" | "journal")}>
