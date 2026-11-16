@@ -31,6 +31,7 @@ The date folder is resolved as `<base>\YYYY\MM\DD`, for example `...\2026\11\16`
 ## Important notes
 
 - The local service listens only on `127.0.0.1:8765`; it does not expose the reservation drive to the internet.
+- The local service allows the production origin `https://nationality.vercel.app` by default. If your deployed website uses another domain, set the Windows environment variable `USER_ACTIVITY_ALLOWED_ORIGINS` to that exact origin (for example `https://your-project.vercel.app`) before starting the BAT file.
 - The XML report is sent from the browser to the local computer only. Reservation documents are read and copied locally and are not uploaded to the website.
 - If a file with the same name already exists in `Desktop\output`, a numbered copy is created instead of overwriting it.
 - Name matching requires the guest's first and last name (case-insensitive, punctuation-insensitive). Middle names are not required when present in the Oracle name.
