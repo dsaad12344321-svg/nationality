@@ -27,7 +27,7 @@ export default function Home() {
   const [inhFile, setInhFile] = useState<File | null>(null);
   const [missingRooms, setMissingRooms] = useState<string[]>([]);
   const [excludedRooms, setExcludedRooms] = useState<string[]>([]);
-  const [towelMismatches, setTowelMismatches] = useState<{ room: string; adults: number; children: number; expectedTowels: number; actualTowels: number }[]>([]);
+  const [towelMismatches, setTowelMismatches] = useState<{ room: string; adults: number; children: number; expectedTowels: number; actualTowels: number; isHouseUse?: boolean }[]>([]);
   const [towelBusy, setTowelBusy] = useState(false);
   const [towelMessage, setTowelMessage] = useState("");
   const [nationalityMissingFile, setNationalityMissingFile] = useState<File | null>(null);
@@ -617,18 +617,18 @@ export default function Home() {
 
           <div className="towel-results">
             <h3>أداة فرعية: مراجعة تطابق عدد النزلاء مع Towel Card</h3>
-            <p className="muted">يشمل الفحص غرف النزلاء وHouse use. غرف House use التي تكون قيمة Towel Card فيها فارغة تُعتبر طبيعية ولا تظهر كمخالفة، أما إذا كانت لها قيمة فيتم فحصها ومقارنتها بقاعدة Adults + Children = Towel Card. مثال: 2 بالغين + 2 أطفال يجب أن يكون Towel Card = 4.</p>
+            <p className="muted">يشمل الفحص غرف النزلاء وHouse Use. في غرف النزلاء تتم مقارنة Towel Card مع Adults + Children. أما غرف House Use فأي قيمة غير فارغة في Towel Card تُعتبر خطأ وتظهر في القائمة مهما كان الرقم، بينما القيمة الفارغة تُعتبر طبيعية ولا تظهر.</p>
             <button type="button" className="button" onClick={checkTowelCounts} disabled={towelBusy || !towelFile || !inhFile}>{towelBusy ? "جارٍ الفحص..." : "فحص أخطاء عدد Towel Card"}</button>
             {towelMismatches.length > 0 && (
               <>
                 <h3>الغرف التي بها اختلاف ({towelMismatches.length})</h3>
                 <div className="table-wrap">
                   <table>
-                    <thead><tr><th>الغرفة</th><th>Adults</th><th>Children</th><th>المفترض</th><th>Towel Card</th></tr></thead>
+                    <thead><tr><th>الغرفة</th><th>النوع</th><th>Adults</th><th>Children</th><th>المفترض</th><th>Towel Card</th></tr></thead>
                     <tbody>
                       {towelMismatches.map((item) => (
                         <tr key={item.room}>
-                          <td>{item.room}</td><td>{item.adults}</td><td>{item.children}</td>
+                          <td>{item.room}</td><td>{item.isHouseUse ? "House Use" : "Guest"}</td><td>{item.adults}</td><td>{item.children}</td>
                           <td>{item.expectedTowels}</td><td>{item.actualTowels}</td>
                         </tr>
                       ))}
