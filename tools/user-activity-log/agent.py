@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import unquote
 
-BASE_FOLDER = Path(r"L:\\Common\\Linked Documents\\1-Reservation Data Long Beach")
+BASE_FOLDER = Path(r"L:\Common\Linked Documents\1-Reservation Data Long Beach")
 PORT = 8765
 EXTENSIONS = {".msg", ".doc", ".docx", ".pdf"}
 MAX_UPLOAD = 25 * 1024 * 1024
