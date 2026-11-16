@@ -107,7 +107,7 @@ export async function POST(request: Request) {
       const mismatches = rows
         .filter((row) => {
           const room = row.room.padStart(4, "0");
-          if (houseUseRooms.has(room) || row.towel === "") return false;
+          if (row.towel === "") return false;
           if (!/^\d+$/.test(row.adults) || !/^\d+$/.test(row.children) || !/^\d+$/.test(row.towel)) return false;
           return Number(row.adults) + Number(row.children) !== Number(row.towel);
         })
@@ -124,8 +124,8 @@ export async function POST(request: Request) {
         mismatches,
         count: mismatches.length,
         scannedRows: rows.length,
-        excludedCount: rows.filter((row) => houseUseRooms.has(row.room.padStart(4, "0"))).length,
-        excludedRooms: [...new Set(rows.filter((row) => houseUseRooms.has(row.room.padStart(4, "0"))).map((row) => row.room.padStart(4, "0")))].sort((a, b) => Number(a) - Number(b)),
+        houseUseCount: rows.filter((row) => houseUseRooms.has(row.room.padStart(4, "0"))).length,
+        houseUseRooms: [...new Set(rows.filter((row) => houseUseRooms.has(row.room.padStart(4, "0"))).map((row) => row.room.padStart(4, "0")))].sort((a, b) => Number(a) - Number(b)),
         excludedCompanies: [...excludedCompanies],
       });
     }
