@@ -183,7 +183,7 @@ export default function GuestNameExtractorPage() {
   }
 
   return (
-    <main className="page" dir="rtl">
+    <div className="page" dir="rtl">
       <header className="hero">
         <p className="eyebrow">Long Beach Resort · Hotel Tools</p>
         <h1>Guest Name Extractor</h1>
@@ -288,6 +288,6 @@ export default function GuestNameExtractorPage() {
         </>
       )}
       <p className="foot"><a href="/" style={{ color: "#1769aa" }}>العودة إلى أدوات الفندق</a></p>
-    </main>
+    </div>
   );
 }
