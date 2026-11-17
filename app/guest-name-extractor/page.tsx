@@ -30,7 +30,7 @@ function textOf(node: Element | null): string {
 }
 
 function directValue(node: Element, keys: string[]): string {
-  for ( (const child of Array.from(node.children)) ) {
+  for (const child of Array.from(node.children)) {
     if (keys.includes(keyOf(child.tagName))) {
       const value = textOf(child);
       if (value) return value;
@@ -59,10 +59,13 @@ function parseReservations(xml: string): Reservation[] {
     const originalFile = directValue(node, aliases.originalFile);
     const guests: Guest[] = [];
 
-    const guestNodes = Array.from(node.getElementsByTagName("*")).filter((child) =>
-      directValue(child, aliases.guestName) ||
-      (aliases.guestName.includes(keyOf(child.tagName)) && textOf(child))
-    );
+    const descendants = Array.from(node.getElementsByTagName("*"));
+    let guestNodes = descendants.filter((child) => directValue(child, aliases.guestName));
+    if (!guestNodes.length) {
+      guestNodes = descendants.filter((child) =>
+        aliases.guestName.includes(keyOf(child.tagName)) && child.children.length === 0 && textOf(child)
+      );
+    }
 
     for (const guestNode of guestNodes) {
       let name = directValue(guestNode, aliases.guestName);
