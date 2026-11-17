@@ -8,6 +8,10 @@ type Reservation = {
   room: string;
   company: string;
   originalFile: string;
+  logGuestName: string;
+  activityDate: string;
+  activityTime: string;
+  action: string;
   guests: Guest[];
 };
 
@@ -19,6 +23,10 @@ const aliases = {
   originalFile: ["originalfilename", "originalfile", "filename", "sourcefile", "commonfilename", "file"],
   guestName: ["fullname", "guestname", "name", "touristname", "passengername", "namesurname"],
   dob: ["dateofbirth", "dob", "birthdate", "birthday"],
+  logGuestName: ["logguestname", "activityguestname"],
+  activityDate: ["inschardate", "activitydate", "logdate"],
+  activityTime: ["inschartime", "activitytime", "logtime"],
+  action: ["actiontype", "action"],
 };
 
 function keyOf(value: string) {
@@ -57,6 +65,10 @@ function parseReservations(xml: string): Reservation[] {
     const room = directValue(node, aliases.room);
     const company = directValue(node, aliases.company);
     const originalFile = directValue(node, aliases.originalFile);
+    const logGuestName = directValue(node, aliases.logGuestName);
+    const activityDate = directValue(node, aliases.activityDate);
+    const activityTime = directValue(node, aliases.activityTime);
+    const action = directValue(node, aliases.action);
     const guests: Guest[] = [];
 
     const descendants = Array.from(node.getElementsByTagName("*"));
@@ -74,7 +86,6 @@ function parseReservations(xml: string): Reservation[] {
       if (name && !guests.some((g) => g.name === name && g.dob === dob)) guests.push({ name, dob });
     }
 
-    // Also support a compact <Guests> text field, where each person is on its own line.
     if (!guests.length) {
       const raw = directValue(node, ["guests", "guestnames", "passengers", "tourists"]);
       for (const line of raw.split(/[\r\n;]+/).map((s) => s.trim()).filter(Boolean)) {
@@ -83,9 +94,14 @@ function parseReservations(xml: string): Reservation[] {
       }
     }
 
-    if (!records.some((r) => r.confirmation === confirmation && r.room === room && r.originalFile === originalFile)) {
-      records.push({ confirmation, room, company, originalFile, guests });
-    }
+    const reservation: Reservation = {
+      confirmation, room, company, originalFile, logGuestName,
+      activityDate, activityTime, action, guests,
+    };
+    if (!records.some((r) =>
+      r.confirmation === confirmation && r.room === room &&
+      r.originalFile === originalFile && r.activityDate === activityDate
+    )) records.push(reservation);
   }
   return records;
 }
@@ -93,19 +109,29 @@ function parseReservations(xml: string): Reservation[] {
 export default function GuestNameExtractorPage() {
   const [records, setRecords] = useState<Reservation[]>([]);
   const [query, setQuery] = useState("");
+  const [companyFilter, setCompanyFilter] = useState("");
   const [fileName, setFileName] = useState("");
   const [error, setError] = useState("");
   const [copied, setCopied] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const companies = useMemo(
+    () => Array.from(new Set(records.map((r) => r.company).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [records]
+  );
+
   const filtered = useMemo(() => {
     const q = norm(query);
-    if (!q) return records;
-    return records.filter((r) => norm([
-      r.confirmation, r.room, r.company, r.originalFile,
-      ...r.guests.flatMap((g) => [g.name, g.dob]),
-    ].join(" ")).includes(q));
-  }, [records, query]);
+    return records.filter((r) => {
+      if (companyFilter && r.company !== companyFilter) return false;
+      if (!q) return true;
+      return norm([
+        r.confirmation, r.room, r.company, r.originalFile, r.logGuestName,
+        r.activityDate, r.activityTime, r.action,
+        ...r.guests.flatMap((g) => [g.name, g.dob]),
+      ].join(" ")).includes(q);
+    });
+  }, [records, query, companyFilter]);
 
   async function loadFile(file?: File) {
     if (!file) return;
@@ -113,12 +139,14 @@ export default function GuestNameExtractorPage() {
     setCopied("");
     try {
       const parsed = parseReservations(await file.text());
-      if (!parsed.length) throw new Error("لم أجد سجلات حجوزات. تأكد أن الملف هو Reservation Detail.xml وأنه يحتوي على Confirmation No. ورقم الغرفة.");
+      if (!parsed.length) throw new Error("لم أجد سجلات حجوزات. تأكد أن الملف يحتوي على CONFIRMATION_NO وROOM_NO.");
       setRecords(parsed);
       setFileName(file.name);
       setQuery("");
+      setCompanyFilter("");
     } catch (e) {
       setRecords([]);
+      setFileName("");
       setError(e instanceof Error ? e.message : "تعذر قراءة ملف XML.");
     }
   }
@@ -136,69 +164,129 @@ export default function GuestNameExtractorPage() {
     return r.guests.map((g) => [g.name, g.dob].filter(Boolean).join("  ")).join("\n");
   }
 
+  function downloadCsv() {
+    const rows = [
+      ["Confirmation No", "Room", "Company", "Guest Names", "Original File", "Activity Date", "Activity Time", "Action"],
+      ...filtered.map((r) => [
+        r.confirmation, r.room, r.company,
+        r.guests.map((g) => [g.name, g.dob].filter(Boolean).join(" ")).join(" | "),
+        r.originalFile, r.activityDate, r.activityTime, r.action,
+      ]),
+    ];
+    const csv = "\uFEFF" + rows.map((row) => row.map((cell) => '"' + String(cell ?? "").replace(/"/g, '""') + '"').join(",")).join("\r\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "Reservation-Detail-filtered.csv";
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <main className="page" dir="rtl">
       <header className="hero">
         <p className="eyebrow">Long Beach Resort · Hotel Tools</p>
         <h1>Guest Name Extractor</h1>
-        <p>ابحث داخل ملف Reservation Detail.xml برقم الحجز أو الغرفة أو اسم النزيل أو الشركة، وانسخ أسماء النزلاء وتواريخ ميلادهم بسهولة.</p>
+        <p>ارفع Reservation Detail.xml لعرض تقرير الحجوزات، والبحث برقم الحجز أو الغرفة أو اسم النزيل أو الشركة، مع فلترة النتائج ونسخ الأسماء.</p>
       </header>
 
       <section className="panel">
         <div className="section-heading">
           <div>
             <h2>1. تحميل ملف الحجوزات</h2>
-            <p className="muted">اختر ملف Reservation Detail.xml الذي تم إنشاؤه بواسطة أداة البحث. تتم قراءة الملف داخل المتصفح ولا يتم رفعه إلى خادم.</p>
+            <p className="muted">اختر Reservation Detail.xml الناتج من أداة البحث. تتم قراءة الملف محلياً داخل المتصفح ولا يتم إرساله إلى الخادم.</p>
           </div>
           <button type="button" className="add-button" onClick={() => fileRef.current?.click()}>اختيار ملف XML</button>
-          <input ref={fileRef} type="file" accept=".xml,text/xml,application/xml" hidden onChange={(e) => loadFile(e.target.files?.[0])} />
+          <input ref={fileRef} type="file" accept=".xml,text/xml,application/xml" hidden onChange={(e) => { loadFile(e.target.files?.[0]); e.currentTarget.value = ""; }} />
         </div>
         {fileName && <p className="filename">الملف الحالي: {fileName} · عدد الحجوزات: {records.length}</p>}
         {error && <div className="notice error">{error}</div>}
       </section>
 
-      <section className="panel">
-        <h2>2. البحث عن حجز أو نزيل</h2>
-        <p className="muted">اكتب Confirmation Number أو رقم الغرفة أو اسم النزيل أو اسم الشركة.</p>
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by confirmation, room, guest name, company..."
-          aria-label="Search reservations"
-          style={{ width: "100%", minHeight: 52, border: "1px solid #cbd6e2", borderRadius: 10, padding: "12px 16px", font: "inherit", direction: "ltr", textAlign: "left" }}
-        />
-        <p className="saved-hint">النتائج: {filtered.length} من {records.length} حجز</p>
-      </section>
-
-      {filtered.map((r, index) => (
-        <section className="panel" key={r.confirmation + "-" + r.room + "-" + index}>
-          <div className="section-heading">
-            <div>
-              <h2>Confirmation No. {r.confirmation}</h2>
-              <p className="muted">Room: {r.room} {r.company ? " · Company: " + r.company : ""}</p>
+      {records.length > 0 && (
+        <>
+          <section className="panel">
+            <h2>2. البحث والفلترة</h2>
+            <p className="muted">يمكنك البحث في رقم التأكيد، رقم الغرفة، اسم النزيل، تاريخ الميلاد، الشركة، اسم الملف، وتاريخ أو وقت الحركة.</p>
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(220px, 2fr) minmax(180px, 1fr)", gap: 12 }}>
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Confirmation / Room / Guest / Company..."
+                aria-label="Search reservations"
+                style={{ width: "100%", minHeight: 48, border: "1px solid #cbd6e2", borderRadius: 10, padding: "10px 14px", font: "inherit", direction: "ltr", textAlign: "left" }}
+              />
+              <select value={companyFilter} onChange={(e) => setCompanyFilter(e.target.value)} aria-label="فلترة حسب الشركة" style={{ minHeight: 48, border: "1px solid #cbd6e2", borderRadius: 10, padding: "8px 12px", font: "inherit", background: "white" }}>
+                <option value="">كل الشركات</option>
+                {companies.map((company) => <option key={company} value={company}>{company}</option>)}
+              </select>
             </div>
-            <button type="button" className="add-button" onClick={() => copyText(guestText(r), "reservation-" + index)}>
-              نسخ جميع الأسماء
-            </button>
-          </div>
-          <div style={{ display: "grid", gap: 8, marginTop: 14 }}>
-            {r.guests.length ? r.guests.map((g, guestIndex) => (
-              <div key={guestIndex} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "12px 14px", border: "1px solid #e1e8f0", borderRadius: 10, background: "#f9fbfd" }}>
-                <div>
-                  <strong>{g.name}</strong>
-                  {g.dob && <div className="muted" style={{ margin: "4px 0 0", direction: "ltr", textAlign: "left" }}>{g.dob}</div>}
-                </div>
-                <button type="button" className="add-button" onClick={() => copyText([g.name, g.dob].filter(Boolean).join("  "), "guest-" + index + "-" + guestIndex)}>نسخ</button>
+            <div className="section-heading" style={{ marginTop: 12 }}>
+              <p className="saved-hint">النتائج المعروضة: {filtered.length} من {records.length} حجز</p>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button type="button" className="add-button" onClick={() => { setQuery(""); setCompanyFilter(""); }}>مسح الفلاتر</button>
+                <button type="button" className="add-button" onClick={downloadCsv} disabled={!filtered.length}>تصدير النتائج CSV</button>
               </div>
-            )) : <p className="muted">لم يتم العثور على أسماء نزلاء في هذا السجل.</p>}
-          </div>
-          {r.originalFile && <p className="saved-hint">Original file: <span dir="ltr">{r.originalFile}</span></p>}
-          {copied === "reservation-" + index && <div className="notice success">تم نسخ جميع الأسماء.</div>}
-          {copied.startsWith("guest-" + index + "-") && <div className="notice success">تم نسخ الاسم.</div>}
-        </section>
-      ))}
+            </div>
+          </section>
 
-      {records.length > 0 && filtered.length === 0 && <section className="panel"><p className="muted">لا توجد نتائج مطابقة لعبارة البحث.</p></section>}
+          <section className="panel">
+            <h2>3. تقرير الحجوزات</h2>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Confirmation No.</th><th>Room</th><th>Company</th><th>Guests</th><th>Activity Date</th><th>Time</th><th>Original File</th></tr>
+                </thead>
+                <tbody>
+                  {filtered.map((r, index) => (
+                    <tr key={r.confirmation + "-" + r.room + "-" + r.originalFile + "-" + index}>
+                      <td dir="ltr">{r.confirmation}</td>
+                      <td dir="ltr">{r.room}</td>
+                      <td>{r.company || "—"}</td>
+                      <td style={{ minWidth: 220, whiteSpace: "normal" }}>
+                        {r.guests.map((g, i) => <div key={i} style={{ marginBottom: 4 }}><strong>{g.name}</strong>{g.dob ? <span className="muted" dir="ltr"> · {g.dob}</span> : null}</div>)}
+                        {r.guests.length > 0 && <button type="button" className="add-button" style={{ marginTop: 6 }} onClick={() => copyText(guestText(r), "table-" + index)}>نسخ الأسماء</button>}
+                        {copied === "table-" + index && <div className="notice success">تم النسخ.</div>}
+                      </td>
+                      <td dir="ltr">{r.activityDate || "—"}</td>
+                      <td dir="ltr">{r.activityTime || "—"}</td>
+                      <td dir="ltr" style={{ whiteSpace: "normal", minWidth: 180 }}>{r.originalFile || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {filtered.length === 0 && <p className="muted">لا توجد نتائج مطابقة للفلاتر الحالية.</p>}
+          </section>
+
+          {filtered.map((r, index) => (
+            <section className="panel" key={"details-" + r.confirmation + "-" + r.room + "-" + index}>
+              <div className="section-heading">
+                <div>
+                  <h2>Confirmation No. {r.confirmation}</h2>
+                  <p className="muted">Room: {r.room}{r.company ? " · Company: " + r.company : ""}</p>
+                  {r.action && <p className="muted">Action: {r.action}</p>}
+                </div>
+                <button type="button" className="add-button" onClick={() => copyText(guestText(r), "reservation-" + index)} disabled={!r.guests.length}>نسخ جميع الأسماء</button>
+              </div>
+              <div style={{ display: "grid", gap: 8, marginTop: 14 }}>
+                {r.guests.length ? r.guests.map((g, guestIndex) => (
+                  <div key={guestIndex} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "12px 14px", border: "1px solid #e1e8f0", borderRadius: 10, background: "#f9fbfd" }}>
+                    <div>
+                      <strong>{g.name}</strong>
+                      {g.dob && <div className="muted" style={{ margin: "4px 0 0", direction: "ltr", textAlign: "left" }}>{g.dob}</div>}
+                    </div>
+                    <button type="button" className="add-button" onClick={() => copyText([g.name, g.dob].filter(Boolean).join("  "), "guest-" + index + "-" + guestIndex)}>نسخ</button>
+                  </div>
+                )) : <p className="muted">لم يتم العثور على أسماء نزلاء في هذا السجل.</p>}
+              </div>
+              {r.originalFile && <p className="saved-hint">Original file: <span dir="ltr">{r.originalFile}</span></p>}
+              {copied === "reservation-" + index && <div className="notice success">تم نسخ جميع الأسماء.</div>}
+              {copied.startsWith("guest-" + index + "-") && <div className="notice success">تم نسخ الاسم.</div>}
+            </section>
+          ))}
+        </>
+      )}
       <p className="foot"><a href="/" style={{ color: "#1769aa" }}>العودة إلى أدوات الفندق</a></p>
     </main>
   );
