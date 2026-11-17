@@ -435,17 +435,21 @@ export default function Home() {
         <p>{activeTool === "nationality" ? "حوّل ملفات nat.xml وman.xml إلى تقرير Excel، ويمكن إضافة Guests INH - By Room لإنشاء تبويب تفاصيل الغرف." : activeTool === "towels" ? "ارفع تقرير الغرف لاستخراج أرقام الغرف التي لا تحتوي على Towel Card." : activeTool === "nationality-missing" ? "ارفع Guest INH By Nationality لاستخراج أرقام الغرف التي لا تحتوي على كود جنسية." : activeTool === "missing-profile" ? "قارن عدد Adults + Children بعدد الأسماء المسجلة في Main Profile وAccompanying Names." : "ارفع Journal by Cashier and Transaction Code لاستخراج الحركات، أو RES_DETAIL لاستخراج غرف الوصول التي لديها 1012 Fixed Charges."}</p>
       </header>
 
-      <section className="panel" style={{ padding: "14px 20px", marginBottom: 18 }}>
-        <a href="/guest-name-extractor" style={{ color: "#1769aa", fontWeight: 700, textDecoration: "none" }}>فتح أداة Guest Name Extractor ←</a>
-      </section>
-
       <section className="panel tool-picker">
         <label htmlFor="tool-select">اختر الأداة</label>
-        <select id="tool-select" value={activeTool} onChange={(e) => setActiveTool(e.target.value as "nationality" | "towels" | "nationality-missing" | "missing-profile" | "journal")}>
+        <select id="tool-select" value={activeTool} onChange={(e) => {
+          const selected = e.target.value;
+          if (selected === "guest-name-extractor") {
+            window.location.href = "https://nationality.vercel.app/guest-name-extractor";
+            return;
+          }
+          setActiveTool(selected as "nationality" | "towels" | "nationality-missing" | "missing-profile" | "journal");
+        }}>
           <option value="nationality">التقرير اليومي للجنسيات</option>
           <option value="towels">Missing Towel Detector</option>
           <option value="nationality-missing">Nationality missing detector</option>\n          <option value="missing-profile">Missing Profile Detector</option>
           <option value="journal">Journal Detector</option>
+          <option value="guest-name-extractor">فتح Guest Name Extractor</option>
         </select>
       </section>
 
