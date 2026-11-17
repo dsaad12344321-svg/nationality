@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ChangeEvent } from "react";
+import GuestNameExtractorPage from "./guest-name-extractor/page";
 
 type Exclusion = { id: number; code: string; count: number };
 type ArrivalRecord = { id: number; code: string; count: number; arrivalDate: string; departureDate: string };
@@ -22,7 +23,7 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [kind, setKind] = useState<"error" | "success" | "info">("info");
-  const [activeTool, setActiveTool] = useState<"nationality" | "towels" | "nationality-missing" | "missing-profile" | "journal">("nationality");
+  const [activeTool, setActiveTool] = useState<"nationality" | "towels" | "nationality-missing" | "missing-profile" | "journal" | "guest-name-extractor">("nationality");
   const [towelFile, setTowelFile] = useState<File | null>(null);
   const [inhFile, setInhFile] = useState<File | null>(null);
   const [missingRooms, setMissingRooms] = useState<string[]>([]);
@@ -431,19 +432,14 @@ export default function Home() {
     <main className="page">
       <header className="hero">
         <p className="eyebrow">أداة التقارير الفندقية</p>
-        <h1>{activeTool === "nationality" ? "التقرير اليومي للجنسيات" : activeTool === "towels" ? "Missing Towel Detector" : activeTool === "nationality-missing" ? "Nationality missing detector" : activeTool === "missing-profile" ? "Missing Profile Detector" : "Journal Detector"}</h1>
-        <p>{activeTool === "nationality" ? "حوّل ملفات nat.xml وman.xml إلى تقرير Excel، ويمكن إضافة Guests INH - By Room لإنشاء تبويب تفاصيل الغرف." : activeTool === "towels" ? "ارفع تقرير الغرف لاستخراج أرقام الغرف التي لا تحتوي على Towel Card." : activeTool === "nationality-missing" ? "ارفع Guest INH By Nationality لاستخراج أرقام الغرف التي لا تحتوي على كود جنسية." : activeTool === "missing-profile" ? "قارن عدد Adults + Children بعدد الأسماء المسجلة في Main Profile وAccompanying Names." : "ارفع Journal by Cashier and Transaction Code لاستخراج الحركات، أو RES_DETAIL لاستخراج غرف الوصول التي لديها 1012 Fixed Charges."}</p>
+        <h1>{activeTool === "nationality" ? "التقرير اليومي للجنسيات" : activeTool === "towels" ? "Missing Towel Detector" : activeTool === "nationality-missing" ? "Nationality missing detector" : activeTool === "missing-profile" ? "Missing Profile Detector" : activeTool === "guest-name-extractor" ? "Guest Name Extractor" : "Journal Detector"}</h1>
+        <p>{activeTool === "nationality" ? "حوّل ملفات nat.xml وman.xml إلى تقرير Excel، ويمكن إضافة Guests INH - By Room لإنشاء تبويب تفاصيل الغرف." : activeTool === "towels" ? "ارفع تقرير الغرف لاستخراج أرقام الغرف التي لا تحتوي على Towel Card." : activeTool === "nationality-missing" ? "ارفع Guest INH By Nationality لاستخراج أرقام الغرف التي لا تحتوي على كود جنسية." : activeTool === "missing-profile" ? "قارن عدد Adults + Children بعدد الأسماء المسجلة في Main Profile وAccompanying Names." : activeTool === "guest-name-extractor" ? "ارفع Reservation Detail.xml لعرض الحجوزات والبحث في بيانات النزلاء." : "ارفع Journal by Cashier and Transaction Code لاستخراج الحركات، أو RES_DETAIL لاستخراج غرف الوصول التي لديها 1012 Fixed Charges."}</p>
       </header>
 
       <section className="panel tool-picker">
         <label htmlFor="tool-select">اختر الأداة</label>
         <select id="tool-select" value={activeTool} onChange={(e) => {
-          const selected = e.target.value;
-          if (selected === "guest-name-extractor") {
-            window.location.href = "https://nationality.vercel.app/guest-name-extractor";
-            return;
-          }
-          setActiveTool(selected as "nationality" | "towels" | "nationality-missing" | "missing-profile" | "journal");
+          setActiveTool(e.target.value as "nationality" | "towels" | "nationality-missing" | "missing-profile" | "journal" | "guest-name-extractor");
         }}>
           <option value="nationality">التقرير اليومي للجنسيات</option>
           <option value="towels">Missing Towel Detector</option>
@@ -453,7 +449,7 @@ export default function Home() {
         </select>
       </section>
 
-      {activeTool === "nationality" ? (
+      {activeTool === "guest-name-extractor" ? <GuestNameExtractorPage /> : activeTool === "nationality" ? (
         <>
       <section className="panel">
         <h2>إدارة البيانات والإعدادات</h2>
