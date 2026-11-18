@@ -22,6 +22,8 @@ const aliases = {
   company: ["company", "companyname", "operator", "agency", "touroperator"],
   originalFile: ["originalfilename", "originalfile", "filename", "sourcefile", "commonfilename", "file"],
   guestName: ["fullname", "guestname", "name", "touristname", "passengername", "namesurname"],
+  lastName: ["lastname", "surname", "familyname"],
+  firstName: ["firstname", "givenname", "forename"],
   dob: ["dateofbirth", "dob", "birthdate", "birthday"],
   logGuestName: ["logguestname", "activityguestname"],
   activityDate: ["inschardate", "activitydate", "logdate"],
@@ -79,11 +81,35 @@ function parseReservations(xml: string): Reservation[] {
       );
     }
 
-    for (const guestNode of guestNodes) {
+    // Reservation Detail files may store tourists as separate LAST_NAME / FIRST_NAME
+    // fields inside a tourist row rather than one combined NAME field.
+    const touristRows = descendants.filter((child) =>
+      directValue(child, aliases.lastName) || directValue(child, aliases.firstName) ||
+      directValue(child, aliases.guestName)
+    ).filter((child) => {
+      const last = directValue(child, aliases.lastName);
+      const first = directValue(child, aliases.firstName);
+      const combined = directValue(child, aliases.guestName);
+      return Boolean((last || first || combined) && directValue(child, aliases.dob) !== "");
+    });
+
+    const rowsToRead = touristRows.length ? touristRows : guestNodes;
+    for (const guestNode of rowsToRead) {
+      const last = directValue(guestNode, aliases.lastName);
+      const first = directValue(guestNode, aliases.firstName);
       let name = directValue(guestNode, aliases.guestName);
-      if (!name && aliases.guestName.includes(keyOf(guestNode.tagName))) name = textOf(guestNode);
+      if (last || first) {
+        name = [last, first].filter(Boolean).join(", ");
+      } else if (!name && aliases.guestName.includes(keyOf(guestNode.tagName))) {
+        name = textOf(guestNode);
+      }
       const dob = directValue(guestNode, aliases.dob);
-      if (name && !guests.some((g) => g.name === name && g.dob === dob)) guests.push({ name, dob });
+      if (name) {
+        // Normalize slash-form names such as VAGNER/ALEKSANDR to LAST, FIRST.
+        if (!last && !first && name.includes("/") && !name.includes(","))
+          name = name.split("/").map((part) => part.trim()).filter(Boolean).join(", ");
+        if (!guests.some((g) => g.name === name && g.dob === dob)) guests.push({ name, dob });
+      }
     }
 
     if (!guests.length) {
@@ -110,6 +136,7 @@ export default function GuestNameExtractorPage() {
   const [records, setRecords] = useState<Reservation[]>([]);
   const [query, setQuery] = useState("");
   const [companyFilter, setCompanyFilter] = useState("");
+  const [timeOrder, setTimeOrder] = useState<"asc" | "desc">("asc");
   const [fileName, setFileName] = useState("");
   const [error, setError] = useState("");
   const [copied, setCopied] = useState("");
@@ -122,7 +149,7 @@ export default function GuestNameExtractorPage() {
 
   const filtered = useMemo(() => {
     const q = norm(query);
-    return records.filter((r) => {
+    const matches = records.filter((r) => {
       if (companyFilter && r.company !== companyFilter) return false;
       if (!q) return true;
       return norm([
@@ -131,7 +158,21 @@ export default function GuestNameExtractorPage() {
         ...r.guests.flatMap((g) => [g.name, g.dob]),
       ].join(" ")).includes(q);
     });
-  }, [records, query, companyFilter]);
+    const toTimestamp = (r: Reservation) => {
+      const date = r.activityDate.match(/^(\\d{1,2})[-/.](\\d{1,2})[-/.](\\d{2,4})$/);
+      const time = r.activityTime.match(/^(\\d{1,2}):(\\d{2})/);
+      if (!date) return Number.NaN;
+      const year = Number(date[3]) < 100 ? 2000 + Number(date[3]) : Number(date[3]);
+      return new Date(year, Number(date[2]) - 1, Number(date[1]), Number(time?.[1] || 0), Number(time?.[2] || 0)).getTime();
+    };
+    return matches.sort((a, b) => {
+      const left = toTimestamp(a), right = toTimestamp(b);
+      if (!Number.isFinite(left) && !Number.isFinite(right)) return 0;
+      if (!Number.isFinite(left)) return 1;
+      if (!Number.isFinite(right)) return -1;
+      return timeOrder === "asc" ? left - right : right - left;
+    });
+  }, [records, query, companyFilter, timeOrder]);
 
   async function loadFile(file?: File) {
     if (!file) return;
@@ -161,7 +202,7 @@ export default function GuestNameExtractorPage() {
   }
 
   function guestText(r: Reservation) {
-    return r.guests.map((g) => [g.name, g.dob].filter(Boolean).join("  ")).join("\n");
+    return r.guests.map((g) => [g.name, g.dob].filter(Boolean).join(" — ")).join("\n");
   }
 
   function downloadCsv() {
@@ -169,7 +210,7 @@ export default function GuestNameExtractorPage() {
       ["Confirmation No", "Room", "Company", "Guest Names", "Original File", "Activity Date", "Activity Time", "Action"],
       ...filtered.map((r) => [
         r.confirmation, r.room, r.company,
-        r.guests.map((g) => [g.name, g.dob].filter(Boolean).join(" ")).join(" | "),
+        r.guests.map((g) => [g.name, g.dob].filter(Boolean).join(" — ")).join(" | "),
         r.originalFile, r.activityDate, r.activityTime, r.action,
       ]),
     ];
@@ -220,6 +261,10 @@ export default function GuestNameExtractorPage() {
                 <option value="">كل الشركات</option>
                 {companies.map((company) => <option key={company} value={company}>{company}</option>)}
               </select>
+              <select value={timeOrder} onChange={(e) => setTimeOrder(e.target.value as "asc" | "desc")} aria-label="ترتيب الحجوزات حسب الوقت" style={{ minHeight: 48, border: "1px solid #cbd6e2", borderRadius: 10, padding: "8px 12px", font: "inherit", background: "white" }}>
+                <option value="asc">الأقدم أولاً (تصاعدي)</option>
+                <option value="desc">الأحدث أولاً (تنازلي)</option>
+              </select>
             </div>
             <div className="section-heading" style={{ marginTop: 12 }}>
               <p className="saved-hint">النتائج المعروضة: {filtered.length} من {records.length} حجز</p>
@@ -235,7 +280,7 @@ export default function GuestNameExtractorPage() {
             <div className="table-wrap">
               <table>
                 <thead>
-                  <tr><th>Confirmation No.</th><th>Room</th><th>Company</th><th>Guests</th><th>Activity Date</th><th>Time</th><th>Original File</th></tr>
+                  <tr><th>Confirmation No.</th><th>Room</th><th>Company</th><th>Guests (Last name, First name — DOB)</th><th>Activity Date</th><th>Time</th><th>Original File</th></tr>
                 </thead>
                 <tbody>
                   {filtered.map((r, index) => (
@@ -244,7 +289,7 @@ export default function GuestNameExtractorPage() {
                       <td dir="ltr">{r.room}</td>
                       <td>{r.company || "—"}</td>
                       <td style={{ minWidth: 220, whiteSpace: "normal" }}>
-                        {r.guests.map((g, i) => <div key={i} style={{ marginBottom: 4 }}><strong>{g.name}</strong>{g.dob ? <span className="muted" dir="ltr"> · {g.dob}</span> : null}</div>)}
+                        {r.guests.map((g, i) => <div key={i} style={{ marginBottom: 4 }}><strong>{g.name}{g.dob ? " — " + g.dob : ""}</strong></div>)}
                         {r.guests.length > 0 && <button type="button" className="add-button" style={{ marginTop: 6 }} onClick={() => copyText(guestText(r), "table-" + index)}>نسخ الأسماء</button>}
                         {copied === "table-" + index && <div className="notice success">تم النسخ.</div>}
                       </td>
@@ -273,8 +318,7 @@ export default function GuestNameExtractorPage() {
                 {r.guests.length ? r.guests.map((g, guestIndex) => (
                   <div key={guestIndex} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "12px 14px", border: "1px solid #e1e8f0", borderRadius: 10, background: "#f9fbfd" }}>
                     <div>
-                      <strong>{g.name}</strong>
-                      {g.dob && <div className="muted" style={{ margin: "4px 0 0", direction: "ltr", textAlign: "left" }}>{g.dob}</div>}
+                      <strong>{g.name}{g.dob ? " — " + g.dob : ""}</strong>
                     </div>
                     <button type="button" className="add-button" onClick={() => copyText([g.name, g.dob].filter(Boolean).join("  "), "guest-" + index + "-" + guestIndex)}>نسخ</button>
                   </div>
