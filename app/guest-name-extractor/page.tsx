@@ -261,10 +261,7 @@ export default function GuestNameExtractorPage() {
                 <option value="">كل الشركات</option>
                 {companies.map((company) => <option key={company} value={company}>{company}</option>)}
               </select>
-              <select value={timeOrder} onChange={(e) => setTimeOrder(e.target.value as "asc" | "desc")} aria-label="ترتيب الحجوزات حسب الوقت" style={{ minHeight: 48, border: "1px solid #cbd6e2", borderRadius: 10, padding: "8px 12px", font: "inherit", background: "white" }}>
-                <option value="asc">الأقدم أولاً (تصاعدي)</option>
-                <option value="desc">الأحدث أولاً (تنازلي)</option>
-              </select>
+
             </div>
             <div className="section-heading" style={{ marginTop: 12 }}>
               <p className="saved-hint">النتائج المعروضة: {filtered.length} من {records.length} حجز</p>
@@ -280,7 +277,15 @@ export default function GuestNameExtractorPage() {
             <div className="table-wrap">
               <table>
                 <thead>
-                  <tr><th>Confirmation No.</th><th>Room</th><th>Company</th><th>Guests (Last name, First name — DOB)</th><th>Activity Date</th><th>Time</th><th>Original File</th></tr>
+                  <tr><th>Confirmation No.</th><th>Room</th><th>Company</th><th>Guests (Last name, First name — DOB)</th><th>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 7, whiteSpace: "nowrap" }}>
+                      Activity Date / Time
+                      <span style={{ display: "inline-flex", gap: 3 }}>
+                        <button type="button" title="ترتيب تصاعدي: الأقدم أولاً" aria-label="ترتيب التاريخ والوقت تصاعدياً" aria-pressed={timeOrder === "asc"} onClick={() => setTimeOrder("asc")} style={{ border: "1px solid #cbd6e2", borderRadius: 5, padding: "2px 7px", cursor: "pointer", background: timeOrder === "asc" ? "#dbeafe" : "white", color: "#174b82", fontWeight: 700 }}>↑</button>
+                        <button type="button" title="ترتيب تنازلي: الأحدث أولاً" aria-label="ترتيب التاريخ والوقت تنازلياً" aria-pressed={timeOrder === "desc"} onClick={() => setTimeOrder("desc")} style={{ border: "1px solid #cbd6e2", borderRadius: 5, padding: "2px 7px", cursor: "pointer", background: timeOrder === "desc" ? "#dbeafe" : "white", color: "#174b82", fontWeight: 700 }}>↓</button>
+                      </span>
+                    </span>
+                  </th><th>Original File</th></tr>
                 </thead>
                 <tbody>
                   {filtered.map((r, index) => (
@@ -293,8 +298,7 @@ export default function GuestNameExtractorPage() {
                         {r.guests.length > 0 && <button type="button" className="add-button" style={{ marginTop: 6 }} onClick={() => copyText(guestText(r), "table-" + index)}>نسخ الأسماء</button>}
                         {copied === "table-" + index && <div className="notice success">تم النسخ.</div>}
                       </td>
-                      <td dir="ltr">{r.activityDate || "—"}</td>
-                      <td dir="ltr">{r.activityTime || "—"}</td>
+                      <td dir="ltr">{[r.activityDate, r.activityTime].filter(Boolean).join(" ") || "—"}</td>
                       <td dir="ltr" style={{ whiteSpace: "normal", minWidth: 180 }}>{r.originalFile || "—"}</td>
                     </tr>
                   ))}
