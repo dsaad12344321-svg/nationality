@@ -357,7 +357,7 @@ export default function Home() {
         const towelCount = towel?.towels ?? 0;
         const profileCount = profile?.found ?? 0;
         const nationality = !nationalityRooms.has(room);
-        const isHouseUse = Boolean(towel?.isHouseUse) || /house\\s*use/i.test(profile?.company || "");
+        const isHouseUse = Boolean(towel?.isHouseUse) || /house\s*use/i.test(profile?.company || "");
         const hasProblem = !towel || towelCount !== expected || !nationality || !profile || profileCount !== expected;
         if (!hasProblem) return [];
         return [{ room, towel: `${towelCount}/${expected}`, nationality, profile: `${profileCount}/${expected}`, isHouseUse }];
