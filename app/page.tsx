@@ -3,7 +3,8 @@
 import { useEffect, useState, type ChangeEvent } from "react";
 import GuestNameExtractorPage from "./guest-name-extractor/page";
 
-type Exclusion = { id: number; code: string; count: number };\ntype ManagerRow = { room: string; towel: string; nationality: boolean; profile: string };
+type Exclusion = { id: number; code: string; count: number };
+type ManagerRow = { room: string; towel: string; nationality: boolean; profile: string };
 type ArrivalRecord = { id: number; code: string; count: number; arrivalDate: string; departureDate: string };
 type ManualAddition = { id: number; code: string; count: number };
 const STORAGE_KEY = "nationality-report-exclusions-v1";
@@ -23,7 +24,13 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [kind, setKind] = useState<"error" | "success" | "info">("info");
-  const [activeTool, setActiveTool] = useState<"nationality" | "towels" | "nationality-missing" | "missing-profile" | "manager-report" | "journal" | "guest-name-extractor">("nationality");\n  const [managerTowelFile, setManagerTowelFile] = useState<File | null>(null);\n  const [managerInhFile, setManagerInhFile] = useState<File | null>(null);\n  const [managerNationalityFile, setManagerNationalityFile] = useState<File | null>(null);\n  const [managerRows, setManagerRows] = useState<ManagerRow[]>([]);\n  const [managerBusy, setManagerBusy] = useState(false);\n  const [managerMessage, setManagerMessage] = useState("");
+  const [activeTool, setActiveTool] = useState<"nationality" | "towels" | "nationality-missing" | "missing-profile" | "manager-report" | "journal" | "guest-name-extractor">("nationality");
+  const [managerTowelFile, setManagerTowelFile] = useState<File | null>(null);
+  const [managerInhFile, setManagerInhFile] = useState<File | null>(null);
+  const [managerNationalityFile, setManagerNationalityFile] = useState<File | null>(null);
+  const [managerRows, setManagerRows] = useState<ManagerRow[]>([]);
+  const [managerBusy, setManagerBusy] = useState(false);
+  const [managerMessage, setManagerMessage] = useState("");
   const [towelFile, setTowelFile] = useState<File | null>(null);
   const [inhFile, setInhFile] = useState<File | null>(null);
   const [missingRooms, setMissingRooms] = useState<string[]>([]);
@@ -302,7 +309,67 @@ export default function Home() {
     } catch { setProfileMessage("تعذر النسخ تلقائيًا. يمكنك تحديد الأرقام ونسخها يدويًا."); }
   }
 
-  async function generateManagerReport() {\n    if (!managerTowelFile || !managerInhFile || !managerNationalityFile) {\n      setManagerMessage("من فضلك ارفع التقارير الثلاثة المطلوبة قبل إنشاء التقرير.");\n      return;\n    }\n    const files = [managerTowelFile, managerInhFile, managerNationalityFile];\n    if (files.some((file) => !file.name.toLowerCase().endsWith(".xml"))) {\n      setManagerMessage("يجب أن تكون جميع الملفات بصيغة XML.");\n      return;\n    }\n    setManagerBusy(true);\n    setManagerRows([]);\n    setManagerMessage("جارٍ فحص التقارير الثلاثة وتجميع النتائج...");\n    try {\n      const towelData = new FormData();\n      towelData.append("file", managerTowelFile);\n      towelData.append("inhFile", managerInhFile);\n      towelData.append("mode", "consistency");\n      const profileData = new FormData();\n      profileData.append("file", managerInhFile);\n      const nationalityData = new FormData();\n      nationalityData.append("file", managerNationalityFile);\n      const [towelResponse, profileResponse, nationalityResponse] = await Promise.all([\n        fetch("/api/missing-towels", { method: "POST", body: towelData }),\n        fetch("/api/missing-profile", { method: "POST", body: profileData }),\n        fetch("/api/nationality-missing", { method: "POST", body: nationalityData }),\n      ]);\n      const [towelResult, profileResult, nationalityResult] = await Promise.all([towelResponse.json(), profileResponse.json(), nationalityResponse.json()]);\n      if (!towelResponse.ok) throw new Error(towelResult.error || "تعذر فحص تقرير Towel Card.");\n      if (!profileResponse.ok) throw new Error(profileResult.error || "تعذر فحص تقرير Profiles.");\n      if (!nationalityResponse.ok) throw new Error(nationalityResult.error || "تعذر فحص تقرير الجنسيات.");\n\n      const towelMap = new Map<string, { expected: number; towels: number | null }>();\n      for (const item of (towelResult.roomCounts || [])) towelMap.set(item.room, { expected: Number(item.expected) || 0, towels: item.towels == null ? null : Number(item.towels) });\n      const profileMap = new Map<string, { expected: number; found: number }>();\n      for (const item of (profileResult.allRows || profileResult.rows || [])) profileMap.set(item.room, { expected: Number(item.expected) || 0, found: Number(item.found) || 0 });\n      const nationalityRooms = new Set<string>(nationalityResult.rooms || []);\n      const allRooms = new Set<string>([...towelMap.keys(), ...profileMap.keys(), ...nationalityRooms]);\n      const rows: ManagerRow[] = [...allRooms].sort((a, b) => Number(a) - Number(b)).flatMap((room) => {\n        const towel = towelMap.get(room);\n        const profile = profileMap.get(room);\n        const expected = profile?.expected || towel?.expected || 0;\n        const towelCount = towel?.towels ?? 0;\n        const profileCount = profile?.found ?? 0;\n        const nationality = !nationalityRooms.has(room);\n        const hasProblem = !towel || towelCount !== expected || !nationality || !profile || profileCount !== expected;\n        if (!hasProblem) return [];\n        return [{ room, towel: `${towelCount}/${expected}`, nationality, profile: `${profileCount}/${expected}` }];\n      });\n      setManagerRows(rows);\n      setManagerMessage(`اكتمل التقرير: تم العثور على ${rows.length} غرفة تحتاج إلى متابعة.`);\n    } catch (error) {\n      setManagerMessage(error instanceof Error ? error.message : "حدث خطأ أثناء إنشاء Manager Report.");\n    } finally { setManagerBusy(false); }\n  }\n\n  function printManagerReport() {\n    window.print();\n  }\n\n  async function detectJournal() {
+  async function generateManagerReport() {
+    if (!managerTowelFile || !managerInhFile || !managerNationalityFile) {
+      setManagerMessage("من فضلك ارفع التقارير الثلاثة المطلوبة قبل إنشاء التقرير.");
+      return;
+    }
+    const files = [managerTowelFile, managerInhFile, managerNationalityFile];
+    if (files.some((file) => !file.name.toLowerCase().endsWith(".xml"))) {
+      setManagerMessage("يجب أن تكون جميع الملفات بصيغة XML.");
+      return;
+    }
+    setManagerBusy(true);
+    setManagerRows([]);
+    setManagerMessage("جارٍ فحص التقارير الثلاثة وتجميع النتائج...");
+    try {
+      const towelData = new FormData();
+      towelData.append("file", managerTowelFile);
+      towelData.append("inhFile", managerInhFile);
+      towelData.append("mode", "consistency");
+      const profileData = new FormData();
+      profileData.append("file", managerInhFile);
+      const nationalityData = new FormData();
+      nationalityData.append("file", managerNationalityFile);
+      const [towelResponse, profileResponse, nationalityResponse] = await Promise.all([
+        fetch("/api/missing-towels", { method: "POST", body: towelData }),
+        fetch("/api/missing-profile", { method: "POST", body: profileData }),
+        fetch("/api/nationality-missing", { method: "POST", body: nationalityData }),
+      ]);
+      const [towelResult, profileResult, nationalityResult] = await Promise.all([towelResponse.json(), profileResponse.json(), nationalityResponse.json()]);
+      if (!towelResponse.ok) throw new Error(towelResult.error || "تعذر فحص تقرير Towel Card.");
+      if (!profileResponse.ok) throw new Error(profileResult.error || "تعذر فحص تقرير Profiles.");
+      if (!nationalityResponse.ok) throw new Error(nationalityResult.error || "تعذر فحص تقرير الجنسيات.");
+
+      const towelMap = new Map<string, { expected: number; towels: number | null }>();
+      for (const item of (towelResult.roomCounts || [])) towelMap.set(item.room, { expected: Number(item.expected) || 0, towels: item.towels == null ? null : Number(item.towels) });
+      const profileMap = new Map<string, { expected: number; found: number }>();
+      for (const item of (profileResult.allRows || profileResult.rows || [])) profileMap.set(item.room, { expected: Number(item.expected) || 0, found: Number(item.found) || 0 });
+      const nationalityRooms = new Set<string>(nationalityResult.rooms || []);
+      const allRooms = new Set<string>([...towelMap.keys(), ...profileMap.keys(), ...nationalityRooms]);
+      const rows: ManagerRow[] = [...allRooms].sort((a, b) => Number(a) - Number(b)).flatMap((room) => {
+        const towel = towelMap.get(room);
+        const profile = profileMap.get(room);
+        const expected = profile?.expected || towel?.expected || 0;
+        const towelCount = towel?.towels ?? 0;
+        const profileCount = profile?.found ?? 0;
+        const nationality = !nationalityRooms.has(room);
+        const hasProblem = !towel || towelCount !== expected || !nationality || !profile || profileCount !== expected;
+        if (!hasProblem) return [];
+        return [{ room, towel: `${towelCount}/${expected}`, nationality, profile: `${profileCount}/${expected}` }];
+      });
+      setManagerRows(rows);
+      setManagerMessage(`اكتمل التقرير: تم العثور على ${rows.length} غرفة تحتاج إلى متابعة.`);
+    } catch (error) {
+      setManagerMessage(error instanceof Error ? error.message : "حدث خطأ أثناء إنشاء Manager Report.");
+    } finally { setManagerBusy(false); }
+  }
+
+  function printManagerReport() {
+    window.print();
+  }
+
+  async function detectJournal() {
     if (!journalFile) { setJournalMessage("من فضلك اختر تقرير Journal by Cashier and Transaction Code أولاً."); return; }
     if (!journalFile.name.toLowerCase().endsWith(".xml")) { setJournalMessage("يجب أن يكون الملف بصيغة XML."); return; }
     setJournalBusy(true);
@@ -327,7 +394,8 @@ export default function Home() {
     const headers = ["Transaction Code", "Transaction Description", "Room", "Guest Name", "Debit", "Credit", "Date", "Time"];
     const values = journalRows.map((row) => [row.code, row.description, row.room, row.guestName, row.debit, row.credit, row.date, row.time]);
     const csvCell = (value: string) => '"' + String(value ?? "").replace(/"/g, '""') + '"';
-    const csv = "\uFEFF" + [headers, ...values].map((line) => line.map(csvCell).join(",")).join("\r\n");
+    const csv = "\uFEFF" + [headers, ...values].map((line) => line.map(csvCell).join(",")).join("\r
+");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
     const link = document.createElement("a");
     link.href = url;
@@ -361,7 +429,8 @@ export default function Home() {
     const headers = ["Room", "Guest Name", "Transaction Code", "Description", "Price", "Quantity", "Frequency", "Begin Date", "End Date"];
     const values = fixedChargeRows.map((row) => [row.room, row.guestName, row.code, row.description, row.price, row.quantity, row.frequency, row.beginDate, row.endDate]);
     const csvCell = (value: string) => '"' + String(value ?? "").replace(/"/g, '""') + '"';
-    const csv = "\uFEFF" + [headers, ...values].map((line) => line.map(csvCell).join(",")).join("\r\n");
+    const csv = "\uFEFF" + [headers, ...values].map((line) => line.map(csvCell).join(",")).join("\r
+");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
     const link = document.createElement("a");
     link.href = url;
@@ -443,7 +512,9 @@ export default function Home() {
         }}>
           <option value="nationality">التقرير اليومي للجنسيات</option>
           <option value="towels">Missing Towel Detector</option>
-          <option value="nationality-missing">Nationality missing detector</option>\n          <option value="missing-profile">Missing Profile Detector</option>\n          <option value="manager-report">Manager Report</option>
+          <option value="nationality-missing">Nationality missing detector</option>
+          <option value="missing-profile">Missing Profile Detector</option>
+          <option value="manager-report">Manager Report</option>
           <option value="journal">Journal Detector</option>
           <option value="guest-name-extractor">فتح Guest Name Extractor</option>
         </select>
@@ -584,7 +655,25 @@ export default function Home() {
         </ul>
       </section>
         </>
-      ) : activeTool === "manager-report" ? (\n        <section className="panel manager-panel">\n          <h2>Manager Report</h2>\n          <p className="muted">ارفع تقارير Towel Card وGuests INH - By Room وGuest INH By Nationality. سيظهر فقط الغرف التي تحتاج إلى متابعة في أي من الفحوص الثلاثة.</p>\n          <div className="uploads manager-uploads">\n            <div className="upload"><label htmlFor="manager-towel-file">1. Towel Card Report — tc.xml</label><input id="manager-towel-file" type="file" accept=".xml,text/xml,application/xml" onChange={(e)=>{setManagerTowelFile(e.target.files?.[0]??null);setManagerRows([]);setManagerMessage("");}} />{managerTowelFile&&<div className="filename">تم الاختيار: {managerTowelFile.name}</div>}</div>\n            <div className="upload"><label htmlFor="manager-inh-file">2. Guests INH - By Room.xml</label><input id="manager-inh-file" type="file" accept=".xml,text/xml,application/xml" onChange={(e)=>{setManagerInhFile(e.target.files?.[0]??null);setManagerRows([]);setManagerMessage("");}} />{managerInhFile&&<div className="filename">تم الاختيار: {managerInhFile.name}</div>}</div>\n            <div className="upload"><label htmlFor="manager-nationality-file">3. Guest INH By Nationality.xml</label><input id="manager-nationality-file" type="file" accept=".xml,text/xml,application/xml" onChange={(e)=>{setManagerNationalityFile(e.target.files?.[0]??null);setManagerRows([]);setManagerMessage("");}} />{managerNationalityFile&&<div className="filename">تم الاختيار: {managerNationalityFile.name}</div>}</div>\n          </div>\n          <button className="button no-print" onClick={generateManagerReport} disabled={managerBusy||!managerTowelFile||!managerInhFile||!managerNationalityFile}>{managerBusy?"جارٍ إعداد التقرير...":"إنشاء Manager Report"}</button>\n          {managerMessage&&<div role="status" className="notice no-print">{managerMessage}</div>}\n          {managerRows.length>0&&<div className="manager-results">\n            <div className="section-heading no-print"><h3>الغرف التي تحتاج إلى متابعة ({managerRows.length})</h3><button type="button" className="add-button" onClick={printManagerReport}>تحميل PDF / طباعة التقرير</button></div>\n            <div className="manager-print-title"><h2>Manager Report</h2><p>Rooms requiring attention: {managerRows.length}</p></div>\n            <div className="table-wrap"><table className="manager-table" dir="ltr"><thead><tr><th>Room number</th><th>Towel</th><th>Nationality</th><th>Profile</th></tr></thead><tbody>{managerRows.map((row)=><tr key={row.room}><td>{row.room}</td><td>{row.towel}</td><td className={row.nationality?"manager-ok":"manager-error"}>{row.nationality?"✓":"✗"}</td><td>{row.profile}</td></tr>)}</tbody></table></div>\n          </div>}\n          {managerRows.length===0&&managerMessage.startsWith("اكتمل التقرير")&&<p className="saved-hint no-print">لا توجد غرف بها مشكلات. جميع الغرف اجتازت الفحوص الثلاثة.</p>}\n        </section>\n      ) : activeTool === "towels" ? (
+      ) : activeTool === "manager-report" ? (
+        <section className="panel manager-panel">
+          <h2>Manager Report</h2>
+          <p className="muted">ارفع تقارير Towel Card وGuests INH - By Room وGuest INH By Nationality. سيظهر فقط الغرف التي تحتاج إلى متابعة في أي من الفحوص الثلاثة.</p>
+          <div className="uploads manager-uploads">
+            <div className="upload"><label htmlFor="manager-towel-file">1. Towel Card Report — tc.xml</label><input id="manager-towel-file" type="file" accept=".xml,text/xml,application/xml" onChange={(e)=>{setManagerTowelFile(e.target.files?.[0]??null);setManagerRows([]);setManagerMessage("");}} />{managerTowelFile&&<div className="filename">تم الاختيار: {managerTowelFile.name}</div>}</div>
+            <div className="upload"><label htmlFor="manager-inh-file">2. Guests INH - By Room.xml</label><input id="manager-inh-file" type="file" accept=".xml,text/xml,application/xml" onChange={(e)=>{setManagerInhFile(e.target.files?.[0]??null);setManagerRows([]);setManagerMessage("");}} />{managerInhFile&&<div className="filename">تم الاختيار: {managerInhFile.name}</div>}</div>
+            <div className="upload"><label htmlFor="manager-nationality-file">3. Guest INH By Nationality.xml</label><input id="manager-nationality-file" type="file" accept=".xml,text/xml,application/xml" onChange={(e)=>{setManagerNationalityFile(e.target.files?.[0]??null);setManagerRows([]);setManagerMessage("");}} />{managerNationalityFile&&<div className="filename">تم الاختيار: {managerNationalityFile.name}</div>}</div>
+          </div>
+          <button className="button no-print" onClick={generateManagerReport} disabled={managerBusy||!managerTowelFile||!managerInhFile||!managerNationalityFile}>{managerBusy?"جارٍ إعداد التقرير...":"إنشاء Manager Report"}</button>
+          {managerMessage&&<div role="status" className="notice no-print">{managerMessage}</div>}
+          {managerRows.length>0&&<div className="manager-results">
+            <div className="section-heading no-print"><h3>الغرف التي تحتاج إلى متابعة ({managerRows.length})</h3><button type="button" className="add-button" onClick={printManagerReport}>تحميل PDF / طباعة التقرير</button></div>
+            <div className="manager-print-title"><h2>Manager Report</h2><p>Rooms requiring attention: {managerRows.length}</p></div>
+            <div className="table-wrap"><table className="manager-table" dir="ltr"><thead><tr><th>Room number</th><th>Towel</th><th>Nationality</th><th>Profile</th></tr></thead><tbody>{managerRows.map((row)=><tr key={row.room}><td>{row.room}</td><td>{row.towel}</td><td className={row.nationality?"manager-ok":"manager-error"}>{row.nationality?"✓":"✗"}</td><td>{row.profile}</td></tr>)}</tbody></table></div>
+          </div>}
+          {managerRows.length===0&&managerMessage.startsWith("اكتمل التقرير")&&<p className="saved-hint no-print">لا توجد غرف بها مشكلات. جميع الغرف اجتازت الفحوص الثلاثة.</p>}
+        </section>
+      ) : activeTool === "towels" ? (
         <section className="panel">
           <h2>Missing Towel Detector</h2>
           <p className="muted">ارفع التقريرين معًا: تقرير Towel Card لاستخراج الغرف ذات القيمة الفارغة، وتقرير Guests INH - By Room لاستبعاد الغرف التي تكون Company Name فيها مثل T- House use. تتم مطابقة أرقام الغرف تلقائيًا بصيغة 4 خانات، والفلترة لا تتأثر بحالة الأحرف.</p>
