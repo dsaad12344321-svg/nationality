@@ -18,6 +18,7 @@
 .manager-uploads .upload:last-child{grid-column:1/-1}
 .manager-results{margin-top:22px}
 .manager-print-title{display:none}
+.manager-print-footer{display:none}
 .manager-table{width:100%;border-collapse:collapse;direction:ltr;text-align:center;font-variant-numeric:tabular-nums}
 .manager-table th,.manager-table td{border:1px solid #d5dee8;padding:12px 10px}
 .manager-table th{background:#edf3f8;color:#173b5e;font-weight:700}
@@ -36,6 +37,7 @@
   .manager-print-title{display:block!important;text-align:center;margin:0 0 18px!important}
   .manager-print-title h2{font-size:22px;margin:0 0 6px}
   .manager-print-title p{font-size:12px;margin:0;color:#444}
+  .manager-print-footer{display:block!important;text-align:center;font-size:10px;color:#555;margin-top:18px;padding-top:8px;border-top:1px solid #ccc}
   .manager-table{width:100%!important}
   .manager-table th,.manager-table td{border:1px solid #555!important;padding:9px 7px!important;color:#111!important}
   .manager-table th{background:#e9edf2!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
