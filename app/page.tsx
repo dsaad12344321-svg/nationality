@@ -667,7 +667,7 @@ export default function Home() {
           <button className="button no-print" onClick={generateManagerReport} disabled={managerBusy||!managerTowelFile||!managerInhFile||!managerNationalityFile}>{managerBusy?"جارٍ إعداد التقرير...":"إنشاء Manager Report"}</button>
           {managerMessage&&<div role="status" className="notice no-print">{managerMessage}</div>}
           {managerRows.length>0&&<div className="manager-results">
-            <div className="section-heading no-print"><h3>الغرف التي تحتاج إلى متابعة ({managerRows.length})</h3><button type="button" className="add-button" onClick={printManagerReport}>تحميل PDF / طباعة التقرير</button></div>
+            <div className="section-heading no-print"><h3>الغرف التي تحتاج إلى متابعة ({managerRows.length})</h3><button type="button" className="add-button" onClick={printManagerReport}>طباعة / حفظ PDF</button></div>
             <div className="manager-print-title"><h2>Manager Report</h2><p>Rooms requiring attention: {managerRows.length}</p></div>
             <div className="table-wrap"><table className="manager-table" dir="ltr"><thead><tr><th>Room number</th><th>Towel</th><th>Nationality</th><th>Profile</th></tr></thead><tbody>{managerRows.map((row)=><tr key={row.room}><td>{row.room}</td><td>{row.towel}</td><td className={row.nationality?"manager-ok":"manager-error"}>{row.nationality?"✓":"✗"}</td><td>{row.profile}</td></tr>)}</tbody></table></div>
           </div>}
