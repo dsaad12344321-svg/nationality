@@ -132,6 +132,7 @@ export async function POST(request: Request) {
 
       return NextResponse.json({
         mismatches,
+        roomCounts,
         count: mismatches.length,
         scannedRows: rows.length,
         houseUseCount: rows.filter((row) => houseUseRooms.has(row.room.padStart(4, "0"))).length,
