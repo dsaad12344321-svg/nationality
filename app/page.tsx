@@ -4,7 +4,7 @@ import { useEffect, useState, type ChangeEvent } from "react";
 import GuestNameExtractorPage from "./guest-name-extractor/page";
 
 type Exclusion = { id: number; code: string; count: number };
-type ManagerRow = { room: string; towel: string; nationality: boolean; profile: string };
+type ManagerRow = { room: string; towel: string; nationality: boolean; profile: string; isHouseUse: boolean };
 type ArrivalRecord = { id: number; code: string; count: number; arrivalDate: string; departureDate: string };
 type ManualAddition = { id: number; code: string; count: number };
 const STORAGE_KEY = "nationality-report-exclusions-v1";
@@ -29,6 +29,7 @@ export default function Home() {
   const [managerInhFile, setManagerInhFile] = useState<File | null>(null);
   const [managerNationalityFile, setManagerNationalityFile] = useState<File | null>(null);
   const [managerRows, setManagerRows] = useState<ManagerRow[]>([]);
+  const [managerRoomFilter, setManagerRoomFilter] = useState<"all" | "house-use" | "guest-in-house">("all");
   const [managerBusy, setManagerBusy] = useState(false);
   const [managerMessage, setManagerMessage] = useState("");
   const [towelFile, setTowelFile] = useState<File | null>(null);
@@ -309,6 +310,8 @@ export default function Home() {
     } catch { setProfileMessage("تعذر النسخ تلقائيًا. يمكنك تحديد الأرقام ونسخها يدويًا."); }
   }
 
+  const visibleManagerRows = managerRows.filter((row) => managerRoomFilter === "all" || (managerRoomFilter === "house-use" ? row.isHouseUse : !row.isHouseUse));
+
   async function generateManagerReport() {
     if (!managerTowelFile || !managerInhFile || !managerNationalityFile) {
       setManagerMessage("من فضلك ارفع التقارير الثلاثة المطلوبة قبل إنشاء التقرير.");
@@ -341,10 +344,10 @@ export default function Home() {
       if (!profileResponse.ok) throw new Error(profileResult.error || "تعذر فحص تقرير Profiles.");
       if (!nationalityResponse.ok) throw new Error(nationalityResult.error || "تعذر فحص تقرير الجنسيات.");
 
-      const towelMap = new Map<string, { expected: number; towels: number | null }>();
-      for (const item of (towelResult.roomCounts || [])) towelMap.set(item.room, { expected: Number(item.expected) || 0, towels: item.towels == null ? null : Number(item.towels) });
-      const profileMap = new Map<string, { expected: number; found: number }>();
-      for (const item of (profileResult.allRows || profileResult.rows || [])) profileMap.set(item.room, { expected: Number(item.expected) || 0, found: Number(item.found) || 0 });
+      const towelMap = new Map<string, { expected: number; towels: number | null; isHouseUse: boolean }>();
+      for (const item of (towelResult.roomCounts || [])) towelMap.set(item.room, { expected: Number(item.expected) || 0, towels: item.towels == null ? null : Number(item.towels), isHouseUse: Boolean(item.isHouseUse) });
+      const profileMap = new Map<string, { expected: number; found: number; company: string }>();
+      for (const item of (profileResult.allRows || profileResult.rows || [])) profileMap.set(item.room, { expected: Number(item.expected) || 0, found: Number(item.found) || 0, company: String(item.company || "") });
       const nationalityRooms = new Set<string>(nationalityResult.rooms || []);
       const allRooms = new Set<string>([...towelMap.keys(), ...profileMap.keys(), ...nationalityRooms]);
       const rows: ManagerRow[] = [...allRooms].sort((a, b) => Number(a) - Number(b)).flatMap((room) => {
@@ -354,9 +357,10 @@ export default function Home() {
         const towelCount = towel?.towels ?? 0;
         const profileCount = profile?.found ?? 0;
         const nationality = !nationalityRooms.has(room);
+        const isHouseUse = Boolean(towel?.isHouseUse) || /house\\s*use/i.test(profile?.company || "");
         const hasProblem = !towel || towelCount !== expected || !nationality || !profile || profileCount !== expected;
         if (!hasProblem) return [];
-        return [{ room, towel: `${towelCount}/${expected}`, nationality, profile: `${profileCount}/${expected}` }];
+        return [{ room, towel: `${towelCount}/${expected}`, nationality, profile: `${profileCount}/${expected}`, isHouseUse }];
       });
       setManagerRows(rows);
       setManagerMessage(`اكتمل التقرير: تم العثور على ${rows.length} غرفة تحتاج إلى متابعة.`);
@@ -662,14 +666,15 @@ export default function Home() {
             <div className="upload"><label htmlFor="manager-inh-file">2. Guests INH - By Room.xml</label><input id="manager-inh-file" type="file" accept=".xml,text/xml,application/xml" onChange={(e)=>{setManagerInhFile(e.target.files?.[0]??null);setManagerRows([]);setManagerMessage("");}} />{managerInhFile&&<div className="filename">تم الاختيار: {managerInhFile.name}</div>}</div>
             <div className="upload"><label htmlFor="manager-nationality-file">3. Guest INH By Nationality.xml</label><input id="manager-nationality-file" type="file" accept=".xml,text/xml,application/xml" onChange={(e)=>{setManagerNationalityFile(e.target.files?.[0]??null);setManagerRows([]);setManagerMessage("");}} />{managerNationalityFile&&<div className="filename">تم الاختيار: {managerNationalityFile.name}</div>}</div>
           </div>
+          <div className="upload no-print"><label htmlFor="manager-room-filter">فلترة الغرف</label><select id="manager-room-filter" value={managerRoomFilter} onChange={(e) => setManagerRoomFilter(e.target.value as "all" | "house-use" | "guest-in-house")}><option value="all">الكل</option><option value="house-use">غرف House Use فقط</option><option value="guest-in-house">غرف Guest In House فقط</option></select></div>
           <button className="button no-print" onClick={generateManagerReport} disabled={managerBusy||!managerTowelFile||!managerInhFile||!managerNationalityFile}>{managerBusy?"جارٍ إعداد التقرير...":"إنشاء Manager Report"}</button>
           {managerMessage&&<div role="status" className="notice no-print">{managerMessage}</div>}
-          {managerRows.length>0&&<div className="manager-results">
-            <div className="section-heading no-print"><h3>الغرف التي تحتاج إلى متابعة ({managerRows.length})</h3><button type="button" className="add-button" onClick={printManagerReport}>طباعة / حفظ PDF</button></div>
-            <div className="manager-print-title"><h2>Manager Report</h2><p>Rooms requiring attention: {managerRows.length}</p></div>
-            <div className="table-wrap"><table className="manager-table" dir="ltr"><thead><tr><th>Room number</th><th>Towel</th><th>Nationality</th><th>Profile</th></tr></thead><tbody>{managerRows.map((row)=><tr key={row.room}><td>{row.room}</td><td>{row.towel}</td><td className={row.nationality?"manager-ok":"manager-error"}>{row.nationality?"✓":"✗"}</td><td>{row.profile}</td></tr>)}</tbody></table></div>
+          {visibleManagerRows.length>0&&<div className="manager-results">
+            <div className="section-heading no-print"><h3>الغرف التي تحتاج إلى متابعة ({visibleManagerRows.length})</h3><button type="button" className="add-button" onClick={printManagerReport}>طباعة / حفظ PDF</button></div>
+            <div className="manager-print-title"><h2>Manager Report</h2><p>Rooms requiring attention: {visibleManagerRows.length}</p></div>
+            <div className="table-wrap"><table className="manager-table" dir="ltr"><thead><tr><th>Room number</th><th>Towel</th><th>Nationality</th><th>Profile</th></tr></thead><tbody>{visibleManagerRows.map((row)=><tr key={row.room}><td>{row.room}</td><td>{row.towel}</td><td className={row.nationality?"manager-ok":"manager-error"}>{row.nationality?"✓":"✗"}</td><td>{row.profile}</td></tr>)}</tbody></table></div>
           </div>}
-          {managerRows.length===0&&managerMessage.startsWith("اكتمل التقرير")&&<p className="saved-hint no-print">لا توجد غرف بها مشكلات. جميع الغرف اجتازت الفحوص الثلاثة.</p>}
+          {managerRows.length===0&&managerMessage.startsWith("اكتمل التقرير")&&<p className="saved-hint no-print">لا توجد غرف بها مشكلات. جميع الغرف اجتازت الفحوص الثلاثة.</p>}{managerRows.length>0&&visibleManagerRows.length===0&&<p className="saved-hint no-print">لا توجد غرف بها مشكلات ضمن نوع الغرف المحدد.</p>}
         </section>
       ) : activeTool === "towels" ? (
         <section className="panel">
