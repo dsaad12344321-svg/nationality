@@ -103,7 +103,14 @@ export async function POST(request: Request) {
     const excludedCompanies = new Set<string>();
     findCompanyRooms(inhParsed, houseUseRooms, excludedCompanies);
 
-    const roomCounts = rows.map((row) => ({\n      room: row.room.padStart(4, "0"),\n      expected: /^\\d+$/.test(row.adults) && /^\\d+$/.test(row.children) ? Number(row.adults) + Number(row.children) : 0,\n      towels: row.towel === "" ? 0 : (/^\\d+$/.test(row.towel) ? Number(row.towel) : null),\n      isHouseUse: houseUseRooms.has(row.room.padStart(4, "0")),\n    })).sort((a, b) => Number(a.room) - Number(b.room));\n\n    if (mode === "consistency") {
+    const roomCounts = rows.map((row) => ({
+      room: row.room.padStart(4, "0"),
+      expected: /^\d+$/.test(row.adults) && /^\d+$/.test(row.children) ? Number(row.adults) + Number(row.children) : 0,
+      towels: row.towel === "" ? 0 : (/^\d+$/.test(row.towel) ? Number(row.towel) : null),
+      isHouseUse: houseUseRooms.has(row.room.padStart(4, "0")),
+    })).sort((a, b) => Number(a.room) - Number(b.room));
+
+    if (mode === "consistency") {
       const mismatches = rows
         .filter((row) => {
           const room = row.room.padStart(4, "0");
