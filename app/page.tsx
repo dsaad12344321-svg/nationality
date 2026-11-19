@@ -428,8 +428,7 @@ export default function Home() {
     const headers = ["Room", "Guest Name", "Transaction Code", "Description", "Price", "Quantity", "Frequency", "Begin Date", "End Date"];
     const values = fixedChargeRows.map((row) => [row.room, row.guestName, row.code, row.description, row.price, row.quantity, row.frequency, row.beginDate, row.endDate]);
     const csvCell = (value: string) => '"' + String(value ?? "").replace(/"/g, '""') + '"';
-    const csv = "\uFEFF" + [headers, ...values].map((line) => line.map(csvCell).join(",")).join("\r
-");
+    const csv = "\uFEFF" + [headers, ...values].map((line) => line.map(csvCell).join(",")).join("\\r\\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
     const link = document.createElement("a");
     link.href = url;
