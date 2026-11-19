@@ -30,7 +30,7 @@
   @page{size:A4 portrait;margin:14mm}
   body{background:#fff!important;color:#111!important}
   .page{max-width:none!important;padding:0!important;margin:0!important}
-  .hero,.tool-picker,.no-print,.manager-panel>h2,.manager-panel>.muted,.manager-uploads{display:none!important}
+  .hero,.tool-picker,.foot,.no-print,.manager-panel>h2,.manager-panel>.muted,.manager-uploads{display:none!important}
   .manager-panel{border:0!important;box-shadow:none!important;padding:0!important;margin:0!important}
   .manager-results{display:block!important;margin:0!important;padding:0!important}
   .manager-print-title{display:block!important;text-align:center;margin:0 0 18px!important}
