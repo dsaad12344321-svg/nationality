@@ -84,14 +84,14 @@ export async function POST(request: Request) {
       };
     }).filter((row) => row.room);
 
-    const mismatches = results.filter((row) => row.status !== "complete");
+    const allRows = results.sort((a, b) => a.room.localeCompare(b.room, undefined, { numeric: true }));\n    const mismatches = allRows.filter((row) => row.status !== "complete");
     return NextResponse.json({
       totalRooms: results.length,
       checkedRooms: results.length,
       mismatchCount: mismatches.length,
       missingCount: mismatches.filter((row) => row.status === "missing").length,
       extraCount: mismatches.filter((row) => row.status === "extra").length,
-      rows: mismatches.sort((a, b) => a.room.localeCompare(b.room, undefined, { numeric: true })),
+      rows: mismatches,\n      allRows,
     });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "حدث خطأ أثناء فحص التقرير." }, { status: 500 });
