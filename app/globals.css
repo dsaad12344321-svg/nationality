@@ -12,3 +12,33 @@
 .towel-results h3{font-size:16px;margin:0}
 .towel-results textarea{display:block;width:100%;margin-top:14px;padding:14px;border:1px solid #cbd6e2;border-radius:10px;background:#f9fbfd;color:#172b4d;font:15px/1.9 monospace;direction:ltr;text-align:left;resize:vertical}
 @media(max-width:650px){.towel-results .section-heading{display:flex;align-items:center;flex-wrap:wrap}.towel-results .section-heading .add-button{width:auto;margin-top:0}}
+
+
+.manager-uploads{grid-template-columns:1fr 1fr}
+.manager-uploads .upload:last-child{grid-column:1/-1}
+.manager-results{margin-top:22px}
+.manager-print-title{display:none}
+.manager-table{width:100%;border-collapse:collapse;direction:ltr;text-align:center;font-variant-numeric:tabular-nums}
+.manager-table th,.manager-table td{border:1px solid #d5dee8;padding:12px 10px}
+.manager-table th{background:#edf3f8;color:#173b5e;font-weight:700}
+.manager-table td{font-size:16px}
+.manager-table tbody tr:nth-child(even){background:#f8fafc}
+.manager-ok{color:#16834a;font-size:21px!important;font-weight:700}
+.manager-error{color:#c62828;font-size:21px!important;font-weight:700}
+@media(max-width:650px){.manager-uploads{grid-template-columns:1fr}.manager-uploads .upload:last-child{grid-column:auto}}
+@media print{
+  @page{size:A4 portrait;margin:14mm}
+  body{background:#fff!important;color:#111!important}
+  .page{max-width:none!important;padding:0!important;margin:0!important}
+  .hero,.tool-picker,.no-print,.manager-panel>h2,.manager-panel>.muted,.manager-uploads{display:none!important}
+  .manager-panel{border:0!important;box-shadow:none!important;padding:0!important;margin:0!important}
+  .manager-results{display:block!important;margin:0!important;padding:0!important}
+  .manager-print-title{display:block!important;text-align:center;margin:0 0 18px!important}
+  .manager-print-title h2{font-size:22px;margin:0 0 6px}
+  .manager-print-title p{font-size:12px;margin:0;color:#444}
+  .manager-table{width:100%!important}
+  .manager-table th,.manager-table td{border:1px solid #555!important;padding:9px 7px!important;color:#111!important}
+  .manager-table th{background:#e9edf2!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .manager-ok{color:#16834a!important}
+  .manager-error{color:#c62828!important}
+}
