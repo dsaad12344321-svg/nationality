@@ -372,7 +372,10 @@ export default function Home() {
   }
 
   function printManagerReport() {
+    const previousTitle = document.title;
+    document.title = " ";
     window.print();
+    document.title = previousTitle;
   }
 
   async function detectJournal() {
@@ -675,6 +678,7 @@ export default function Home() {
             <div className="section-heading no-print"><h3>الغرف التي تحتاج إلى متابعة ({visibleManagerRows.length})</h3><button type="button" className="add-button" onClick={printManagerReport}>طباعة / حفظ PDF</button></div>
             <div className="manager-print-title"><h2>Manager Report</h2><p>Rooms requiring attention: {visibleManagerRows.length}</p></div>
             <div className="table-wrap"><table className="manager-table" dir="ltr"><thead><tr><th>Room number</th><th>Towel</th><th>Nationality</th><th>Profile</th></tr></thead><tbody>{visibleManagerRows.map((row)=><tr key={row.room}><td>{row.room}</td><td>{row.towel}</td><td className={row.nationality?"manager-ok":"manager-error"}>{row.nationality?"✓":"✗"}</td><td>{row.profile}</td></tr>)}</tbody></table></div>
+            <div className="manager-print-footer">created by: Daniel Atef</div>
           </div>}
           {managerRows.length===0&&managerMessage.startsWith("اكتمل التقرير")&&<p className="saved-hint no-print">لا توجد غرف بها مشكلات. جميع الغرف اجتازت الفحوص الثلاثة.</p>}{managerRows.length>0&&visibleManagerRows.length===0&&<p className="saved-hint no-print">لا توجد غرف بها مشكلات ضمن نوع الغرف المحدد.</p>}
         </section>
