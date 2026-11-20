@@ -53,6 +53,7 @@ export default function Home() {
   const [profileDifferenceFilter, setProfileDifferenceFilter] = useState<"all" | "missing" | "extra">("all");
   const [profileSelectedCompanies, setProfileSelectedCompanies] = useState<string[]>([]);
   const [profileVisibleColumns, setProfileVisibleColumns] = useState<string[]>(["room","adults","children","expected","found","difference","company","arrival","departure","names"]);
+  const [euroRate, setEuroRate] = useState("");
   const [journalFile, setJournalFile] = useState<File | null>(null);
   const [journalRows, setJournalRows] = useState<{ code: string; description: string; room: string; guestName: string; debit: string; credit: string; date: string; time: string }[]>([]);
   const [journalSummary, setJournalSummary] = useState<{ code: string; description: string; count: number }[]>([]);
@@ -378,7 +379,15 @@ export default function Home() {
     document.title = previousTitle;
   }
 
+  function toEuro(amount: string) {
+    const rate = Number(euroRate);
+    const egp = Number(String(amount ?? "").replace(/,/g, "").trim());
+    if (!Number.isFinite(rate) || rate <= 0 || !Number.isFinite(egp)) return "";
+    return (egp / rate).toFixed(2);
+  }
+
   async function detectJournal() {
+    if (!Number.isFinite(Number(euroRate)) || Number(euroRate) <= 0) { setJournalMessage("من فضلك أدخل سعر اليورو بالجنيه المصري بشكل صحيح أولاً."); return; }
     if (!journalFile) { setJournalMessage("من فضلك اختر تقرير Journal by Cashier and Transaction Code أولاً."); return; }
     if (!journalFile.name.toLowerCase().endsWith(".xml")) { setJournalMessage("يجب أن يكون الملف بصيغة XML."); return; }
     setJournalBusy(true);
@@ -400,8 +409,8 @@ export default function Home() {
   }
 
   function downloadJournalCsv() {
-    const headers = ["Transaction Code", "Transaction Description", "Room", "Guest Name", "Debit", "Credit", "Date", "Time"];
-    const values = journalRows.map((row) => [row.code, row.description, row.room, row.guestName, row.debit, row.credit, row.date, row.time]);
+    const headers = ["Transaction Code", "Transaction Description", "Room", "Guest Name", "Debit", "EUR", "Credit", "Date", "Time"];
+    const values = journalRows.map((row) => [row.code, row.description, row.room, row.guestName, row.debit, toEuro(row.debit), row.credit, row.date, row.time]);
     const csvCell = (value: string) => '"' + String(value ?? "").replace(/"/g, '""') + '"';
     const csv = "\uFEFF" + [headers, ...values].map((line) => line.map(csvCell).join(",")).join("\r\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
@@ -415,6 +424,7 @@ export default function Home() {
   }
 
   async function detectFixedCharges() {
+    if (!Number.isFinite(Number(euroRate)) || Number(euroRate) <= 0) { setFixedChargeMessage("من فضلك أدخل سعر اليورو بالجنيه المصري بشكل صحيح أولاً."); return; }
     if (!fixedChargeFile) { setFixedChargeMessage("من فضلك اختر تقرير الوصول RES_DETAIL أولاً."); return; }
     if (!fixedChargeFile.name.toLowerCase().endsWith(".xml")) { setFixedChargeMessage("يجب أن يكون الملف بصيغة XML."); return; }
     setFixedChargeBusy(true);
@@ -434,8 +444,8 @@ export default function Home() {
   }
 
   function downloadFixedChargesCsv() {
-    const headers = ["Room", "Guest Name", "Transaction Code", "Description", "Price", "Quantity", "Frequency", "Begin Date", "End Date"];
-    const values = fixedChargeRows.map((row) => [row.room, row.guestName, row.code, row.description, row.price, row.quantity, row.frequency, row.beginDate, row.endDate]);
+    const headers = ["Room", "Guest Name", "Transaction Code", "Description", "Price", "EUR", "Quantity", "Frequency", "Begin Date", "End Date"];
+    const values = fixedChargeRows.map((row) => [row.room, row.guestName, row.code, row.description, row.price, toEuro(row.price), row.quantity, row.frequency, row.beginDate, row.endDate]);
     const csvCell = (value: string) => '"' + String(value ?? "").replace(/"/g, '""') + '"';
     const csv = "\uFEFF" + [headers, ...values].map((line) => line.map(csvCell).join(",")).join("\r\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
@@ -883,6 +893,11 @@ export default function Home() {
           <h2>Journal Detector</h2>
           <p className="muted">ارفع تقرير Journal by Cashier and Transaction Code بصيغة XML. ستُستخرج الأكواد التالية فقط: 1010, 1012, 1014, 1019, 1020, 1025, 4500, 4501, 5001, 5003, 5005, 5008, 5009, 5086. باقي الأكواد يتم تجاهلها.</p>
           <div className="upload">
+            <label htmlFor="euro-rate">سعر اليورو الحالي بالجنيه المصري (1 EUR = EGP)</label>
+            <input id="euro-rate" type="number" min="0.01" step="0.01" placeholder="مثال: 55.00" value={euroRate} onChange={(e) => setEuroRate(e.target.value)} />
+            <p className="saved-hint">سيتم حساب قيمة EUR بقسمة المبلغ بالجنيه المصري على سعر اليورو المدخل. يُستخدم السعر في تقرير Journal وكذلك 1012 Fixed Charges.</p>
+          </div>
+          <div className="upload">
             <label htmlFor="journal-file">تقرير Journal by Cashier and Transaction Code</label>
             <input id="journal-file" type="file" accept=".xml,text/xml,application/xml" onChange={(e) => { setJournalFile(e.target.files?.[0] ?? null); setJournalRows([]); setJournalSummary([]); setJournalMessage(""); }} />
             {journalFile && <div className="filename">تم الاختيار: {journalFile.name}</div>}
@@ -916,10 +931,10 @@ export default function Home() {
                       </h3>
                       <div className="table-wrap" style={{ direction: "ltr" }}>
                         <table dir="ltr" style={{ direction: "ltr", textAlign: "left" }}>
-                          <thead><tr><th>Room</th><th>Guest Name</th><th>Debit</th><th>Credit</th><th>Date</th><th>Time</th></tr></thead>
+                          <thead><tr><th>Room</th><th>Guest Name</th><th>Debit</th><th>EUR</th><th>Credit</th><th>Date</th><th>Time</th></tr></thead>
                           <tbody>
                             {codeRows.map((row, index) => <tr key={row.code + "-" + row.room + "-" + index}>
-                              <td>{row.room}</td><td>{row.guestName}</td><td>{row.debit}</td><td>{row.credit}</td><td>{row.date}</td><td>{row.time}</td>
+                              <td>{row.room}</td><td>{row.guestName}</td><td>{row.debit}</td><td>{toEuro(row.debit)}</td><td>{row.credit}</td><td>{row.date}</td><td>{row.time}</td>
                             </tr>)}
                           </tbody>
                         </table>
@@ -950,9 +965,9 @@ export default function Home() {
                 <div dir="ltr" style={{ direction: "ltr", textAlign: "left" }}>
                   <div className="table-wrap">
                     <table dir="ltr" style={{ direction: "ltr", textAlign: "left" }}>
-                      <thead><tr><th>Room</th><th>Guest Name</th><th>Code</th><th>Description</th><th>Price</th><th>Frequency</th><th>Begin Date</th><th>End Date</th></tr></thead>
+                      <thead><tr><th>Room</th><th>Guest Name</th><th>Code</th><th>Description</th><th>Price</th><th>EUR</th><th>Frequency</th><th>Begin Date</th><th>End Date</th></tr></thead>
                       <tbody>{fixedChargeRows.map((row, index) => <tr key={row.room + "-" + index}>
-                        <td>{row.room}</td><td>{row.guestName}</td><td>{row.code}</td><td>{row.description}</td><td>{row.price}</td><td>{row.frequency}</td><td>{row.beginDate}</td><td>{row.endDate}</td>
+                        <td>{row.room}</td><td>{row.guestName}</td><td>{row.code}</td><td>{row.description}</td><td>{row.price}</td><td>{toEuro(row.price)}</td><td>{row.frequency}</td><td>{row.beginDate}</td><td>{row.endDate}</td>
                       </tr>)}</tbody>
                     </table>
                   </div>
