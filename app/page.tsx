@@ -390,14 +390,14 @@ export default function Home() {
     const parseDate = (value: string) => {
       const text = String(value ?? "").trim();
       let year: number, month: number, day: number;
-      let match = text.match(/^(\\d{1,2})[-/.](\\d{1,2})[-/.](\\d{2,4})$/);
+      let match = text.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/);
       if (match) {
         day = Number(match[1]);
         month = Number(match[2]);
         year = Number(match[3]);
         if (year < 100) year += 2000;
       } else {
-        match = text.match(/^(\\d{4})[-/.](\\d{1,2})[-/.](\\d{1,2})$/);
+        match = text.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
         if (!match) return null;
         year = Number(match[1]);
         month = Number(match[2]);
