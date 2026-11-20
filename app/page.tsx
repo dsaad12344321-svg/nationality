@@ -386,6 +386,40 @@ export default function Home() {
     return (egp / rate).toFixed(2);
   }
 
+  function dateDifferenceDays(beginDate: string, endDate: string) {
+    const parseDate = (value: string) => {
+      const text = String(value ?? "").trim();
+      let year: number, month: number, day: number;
+      let match = text.match(/^(\\d{1,2})[-/.](\\d{1,2})[-/.](\\d{2,4})$/);
+      if (match) {
+        day = Number(match[1]);
+        month = Number(match[2]);
+        year = Number(match[3]);
+        if (year < 100) year += 2000;
+      } else {
+        match = text.match(/^(\\d{4})[-/.](\\d{1,2})[-/.](\\d{1,2})$/);
+        if (!match) return null;
+        year = Number(match[1]);
+        month = Number(match[2]);
+        day = Number(match[3]);
+      }
+      const date = new Date(Date.UTC(year, month - 1, day));
+      if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+      return date;
+    };
+    const begin = parseDate(beginDate);
+    const end = parseDate(endDate);
+    if (!begin || !end) return null;
+    return Math.round((end.getTime() - begin.getTime()) / 86400000);
+  }
+
+  function fixedChargeTotal(row: { beginDate: string; endDate: string; price: string }) {
+    const days = dateDifferenceDays(row.beginDate, row.endDate);
+    const euro = Number(toEuro(row.price));
+    if (days === null || !Number.isFinite(euro)) return "";
+    return (days * euro).toFixed(2);
+  }
+
   async function detectJournal() {
     if (!Number.isFinite(Number(euroRate)) || Number(euroRate) <= 0) { setJournalMessage("من فضلك أدخل سعر اليورو بالجنيه المصري بشكل صحيح أولاً."); return; }
     if (!journalFile) { setJournalMessage("من فضلك اختر تقرير Journal by Cashier and Transaction Code أولاً."); return; }
@@ -444,8 +478,8 @@ export default function Home() {
   }
 
   function downloadFixedChargesCsv() {
-    const headers = ["Room", "Guest Name", "Transaction Code", "Description", "Price", "EUR", "Quantity", "Frequency", "Begin Date", "End Date"];
-    const values = fixedChargeRows.map((row) => [row.room, row.guestName, row.code, row.description, row.price, toEuro(row.price), row.quantity, row.frequency, row.beginDate, row.endDate]);
+    const headers = ["Room", "Guest Name", "Transaction Code", "Description", "Price", "EUR", "Quantity", "Frequency", "Begin Date", "End Date", "Total"];
+    const values = fixedChargeRows.map((row) => [row.room, row.guestName, row.code, row.description, row.price, toEuro(row.price), row.quantity, row.frequency, row.beginDate, row.endDate, fixedChargeTotal(row)]);
     const csvCell = (value: string) => '"' + String(value ?? "").replace(/"/g, '""') + '"';
     const csv = "\uFEFF" + [headers, ...values].map((line) => line.map(csvCell).join(",")).join("\r\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
@@ -965,9 +999,9 @@ export default function Home() {
                 <div dir="ltr" style={{ direction: "ltr", textAlign: "left" }}>
                   <div className="table-wrap">
                     <table dir="ltr" style={{ direction: "ltr", textAlign: "left" }}>
-                      <thead><tr><th>Room</th><th>Guest Name</th><th>Code</th><th>Description</th><th>Price</th><th>EUR</th><th>Frequency</th><th>Begin Date</th><th>End Date</th></tr></thead>
+                      <thead><tr><th>Room</th><th>Guest Name</th><th>Code</th><th>Description</th><th>Price</th><th>EUR</th><th>Frequency</th><th>Begin Date</th><th>End Date</th><th>Total</th></tr></thead>
                       <tbody>{fixedChargeRows.map((row, index) => <tr key={row.room + "-" + index}>
-                        <td>{row.room}</td><td>{row.guestName}</td><td>{row.code}</td><td>{row.description}</td><td>{row.price}</td><td>{toEuro(row.price)}</td><td>{row.frequency}</td><td>{row.beginDate}</td><td>{row.endDate}</td>
+                        <td>{row.room}</td><td>{row.guestName}</td><td>{row.code}</td><td>{row.description}</td><td>{row.price}</td><td>{toEuro(row.price)}</td><td>{row.frequency}</td><td>{row.beginDate}</td><td>{row.endDate}</td><td>{fixedChargeTotal(row)}</td>
                       </tr>)}</tbody>
                     </table>
                   </div>
