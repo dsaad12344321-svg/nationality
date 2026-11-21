@@ -44,7 +44,7 @@ function normalizeRoom(value: string): string {
   return /^\d{3,4}$/.test(room) ? room.padStart(4, "0") : "";
 }
 
-/** Reads only ZIP central-directory filenames; PDF contents are not extracted or uploaded anywhere. */
+/** Reads ZIP central-directory filenames without extracting PDF contents. */
 function getZipPdfNames(bytes: Buffer): string[] {
   const minOffset = Math.max(0, bytes.length - 22 - 0xffff);
   let eocd = -1;
@@ -79,6 +79,8 @@ function getZipPdfNames(bytes: Buffer): string[] {
 function roomsFromPdfName(name: string): string[] {
   const base = name.split(/[\\/]/).pop() || name;
   const withoutExtension = base.replace(/\.pdf$/i, "");
+  // A filename consisting only of a calendar date is not a room-number source.
+  if (/^\d{1,2}[-_.]\d{1,2}[-_.]\d{4}$/.test(withoutExtension)) return [];
   const matches = withoutExtension.match(/(?<!\d)\d{3,4}(?!\d)/g) || [];
   return matches.map(normalizeRoom).filter(Boolean);
 }
