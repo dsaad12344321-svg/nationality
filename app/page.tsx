@@ -497,17 +497,60 @@ export default function Home() {
     link.remove();
     URL.revokeObjectURL(url);
   }
+  async function extractPdfRoomsFromZip(file: File) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const minOffset = Math.max(0, bytes.length - 22 - 0xffff);
+    let eocd = -1;
+    for (let i = bytes.length - 22; i >= minOffset; i--) {
+      if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+    }
+    if (eocd < 0) throw new Error("ملف ZIP غير صالح أو لا يحتوي على فهرس ملفات قابل للقراءة.");
+    const entryCount = view.getUint16(eocd + 10, true);
+    let offset = view.getUint32(eocd + 16, true);
+    const decoder = new TextDecoder("utf-8");
+    const rooms = new Set<string>();
+    let pdfFiles = 0;
+    for (let index = 0; index < entryCount; index++) {
+      if (offset + 46 > bytes.length || view.getUint32(offset, true) !== 0x02014b50) {
+        throw new Error("تعذر قراءة قائمة الملفات داخل ZIP. تأكد أن الملف غير تالف.");
+      }
+      const flags = view.getUint16(offset + 8, true);
+      const nameLength = view.getUint16(offset + 28, true);
+      const extraLength = view.getUint16(offset + 30, true);
+      const commentLength = view.getUint16(offset + 32, true);
+      const start = offset + 46;
+      const end = start + nameLength;
+      if (end > bytes.length) throw new Error("قائمة الملفات داخل ZIP غير مكتملة.");
+      const name = decoder.decode(bytes.subarray(start, end));
+      if (/\\.pdf$/i.test(name) && !name.endsWith("/")) {
+        pdfFiles++;
+        const base = name.split(/[\\\\/]/).pop()!.replace(/\\.pdf$/i, "");
+        if (!/^\\d{1,2}[-_.]\\d{1,2}[-_.]\\d{4}$/.test(base)) {
+          const matches = base.match(/(?<!\\d)\\d{3,4}(?!\\d)/g) || [];
+          matches.forEach((room) => rooms.add(room.padStart(4, "0")));
+        }
+      }
+      offset = end + extraLength + commentLength;
+    }
+    if (!pdfFiles) throw new Error("لم يتم العثور على ملفات PDF داخل ملف ZIP.");
+    return { rooms: [...rooms], pdfFiles };
+  }
+
   async function detectRCMissing() {
     if (!rcResFile || !rcZipFile) { setRcMessage("من فضلك اختر تقرير RES_DETAIL.xml وملف ZIP الذي يحتوي على ملفات PDF."); return; }
     if (!rcResFile.name.toLowerCase().endsWith(".xml") || !rcZipFile.name.toLowerCase().endsWith(".zip")) { setRcMessage("تأكد من اختيار تقرير XML وملف ZIP صحيح."); return; }
     setRcBusy(true);
-    setRcMessage("جارٍ مقارنة غرف تقرير الوصول بأسماء ملفات PDF...");
+    setRcMessage("جارٍ قراءة أسماء ملفات PDF من ZIP...");
     setRcMissingRooms([]);
     setRcSummary(null);
     try {
+      const { rooms, pdfFiles } = await extractPdfRoomsFromZip(rcZipFile);
+      setRcMessage("تم استخراج أرقام الغرف من " + pdfFiles + " ملف PDF. جارٍ مقارنتها بتقرير الوصول...");
       const data = new FormData();
       data.append("resFile", rcResFile);
-      data.append("zipFile", rcZipFile);
+      data.append("pdfRooms", JSON.stringify(rooms));
+      data.append("pdfFiles", String(pdfFiles));
       const response = await fetch("/api/rc-missing", { method: "POST", body: data });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "تعذر فحص الملفات.");
