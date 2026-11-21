@@ -515,7 +515,6 @@ export default function Home() {
       if (offset + 46 > bytes.length || view.getUint32(offset, true) !== 0x02014b50) {
         throw new Error("تعذر قراءة قائمة الملفات داخل ZIP. تأكد أن الملف غير تالف.");
       }
-      const flags = view.getUint16(offset + 8, true);
       const nameLength = view.getUint16(offset + 28, true);
       const extraLength = view.getUint16(offset + 30, true);
       const commentLength = view.getUint16(offset + 32, true);
@@ -1042,7 +1041,7 @@ export default function Home() {
                 <h3>الغرف التي لا يوجد لها PDF ({rcMissingRooms.length})</h3>
                 {rcMissingRooms.length > 0 && <div className="uploads">
                   <button type="button" className="add-button" onClick={copyRCMissingRooms}>نسخ الأرقام</button>
-                  <button type="button" className="add-button" onClick={downloadRCMissingCsv}>تنزيل Excel / CSV</button>
+                  <button type="button" className="add-button" onClick={downloadRCMissingCsv}>تنزيل CSV لفتحه في Excel</button>
                 </div>}
               </div>
               {rcMissingRooms.length > 0 ? <textarea readOnly value={rcMissingRooms.join(",")} rows={5} aria-label="الغرف التي لا يوجد لها PDF" /> : <p className="saved-hint">ممتاز! جميع غرف تقرير الوصول لها ملفات PDF مطابقة.</p>}
