@@ -1006,7 +1006,7 @@ export default function Home() {
             <div className="towel-results">
               <h3>ملخص الفحص</h3>
               <div className="summary-grid">
-                <div><strong>{rcSummary.totalRooms}</strong><span>إجمالي غرف الوصول</span></div>
+                <div><strong>{rcSummary.totalRooms}</strong><span>الغرف المطلوب لها PDF</span></div>
                 <div><strong>{rcSummary.matchedRooms}</strong><span>غرف لها ملفات PDF</span></div>
                 <div><strong>{rcSummary.missingCount}</strong><span>غرف بدون PDF</span></div>
                 <div><strong>{rcSummary.pdfFiles}</strong><span>عدد ملفات PDF المختارة</span></div>
