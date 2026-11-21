@@ -73,12 +73,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "لم يتم العثور على سجلات G_RESERVATION. تأكد أنك رفعت تقرير RES_DETAIL المستخدم في Journal Detector." }, { status: 404 });
     }
 
-    const reportRooms = [...new Set(reservations.map((reservation) =>
+    const statusKey = Object.keys(reservations[0]).find((key) =>
+      ["RES_STATUS", "RESSTATUS", "RESERVATION_STATUS", "RESERVATIONSTATUS"].includes(key.replace(/[.\\s-]/g, "").toUpperCase())
+    );
+    if (!statusKey) {
+      return NextResponse.json({ error: "لم أتمكن من تحديد عمود Res. Status داخل RES_DETAIL.xml. أرسل لي نسخة من التقرير لأحدد اسم الحقل الصحيح قبل اعتماد المقارنة." }, { status: 422 });
+    }
+
+    const eligibleReservations = reservations.filter((reservation) =>
+      textValue(reservation[statusKey]).trim().toUpperCase() !== "CO"
+    );
+    const coExcludedCount = reservations.length - eligibleReservations.length;
+    const reportRooms = [...new Set(eligibleReservations.map((reservation) =>
       normalizeRoom(textValue(reservation.ROOM_NO) || textValue(reservation.DISP_ROOM_NO))
     ).filter(Boolean))].sort((a, b) => Number(a) - Number(b));
 
     if (!reportRooms.length) {
-      return NextResponse.json({ error: "تمت قراءة التقرير، لكن لم يتم العثور على أرقام غرف مكونة من 3 أو 4 خانات." }, { status: 404 });
+      return NextResponse.json({ error: "لم يتم العثور على غرف مستحقة للفحص بعد استبعاد الحالات CO." }, { status: 404 });
     }
 
     let suppliedRooms: unknown;
@@ -106,6 +117,7 @@ export async function POST(request: Request) {
       missingCount: missingRooms.length,
       pdfFiles,
       pdfRoomsCount: pdfRooms.size,
+      coExcludedCount,
       missingRooms,
     });
   } catch (error) {
