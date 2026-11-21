@@ -523,11 +523,11 @@ export default function Home() {
       const end = start + nameLength;
       if (end > bytes.length) throw new Error("قائمة الملفات داخل ZIP غير مكتملة.");
       const name = decoder.decode(bytes.subarray(start, end));
-      if (/\\.pdf$/i.test(name) && !name.endsWith("/")) {
+      if (/\.pdf$/i.test(name) && !name.endsWith("/")) {
         pdfFiles++;
-        const base = name.split(/[\\\\/]/).pop()!.replace(/\\.pdf$/i, "");
-        if (!/^\\d{1,2}[-_.]\\d{1,2}[-_.]\\d{4}$/.test(base)) {
-          const matches = base.match(/(?<!\\d)\\d{3,4}(?!\\d)/g) || [];
+        const base = name.split(/[\\/]/).pop()!.replace(/\.pdf$/i, "");
+        if (!/^\d{1,2}[-_.]\d{1,2}[-_.]\d{4}$/.test(base)) {
+          const matches = base.match(/(?<!\d)\d{3,4}(?!\d)/g) || [];
           matches.forEach((room) => rooms.add(room.padStart(4, "0")));
         }
       }
