@@ -64,7 +64,7 @@ export default function Home() {
   const [fixedChargeBusy, setFixedChargeBusy] = useState(false);
   const [fixedChargeMessage, setFixedChargeMessage] = useState("");
   const [rcResFile, setRcResFile] = useState<File | null>(null);
-  const [rcZipFile, setRcZipFile] = useState<File | null>(null);
+  const [rcPdfFiles, setRcPdfFiles] = useState<File[]>([]);
   const [rcMissingRooms, setRcMissingRooms] = useState<string[]>([]);
   const [rcSummary, setRcSummary] = useState<{ totalRooms: number; matchedRooms: number; missingCount: number; pdfFiles: number; pdfRoomsCount: number } | null>(null);
   const [rcBusy, setRcBusy] = useState(false);
@@ -497,55 +497,29 @@ export default function Home() {
     link.remove();
     URL.revokeObjectURL(url);
   }
-  async function extractPdfRoomsFromZip(file: File) {
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    const minOffset = Math.max(0, bytes.length - 22 - 0xffff);
-    let eocd = -1;
-    for (let i = bytes.length - 22; i >= minOffset; i--) {
-      if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
-    }
-    if (eocd < 0) throw new Error("ملف ZIP غير صالح أو لا يحتوي على فهرس ملفات قابل للقراءة.");
-    const entryCount = view.getUint16(eocd + 10, true);
-    let offset = view.getUint32(eocd + 16, true);
-    const decoder = new TextDecoder("utf-8");
+  function extractPdfRoomsFromFiles(files: File[]) {
     const rooms = new Set<string>();
-    let pdfFiles = 0;
-    for (let index = 0; index < entryCount; index++) {
-      if (offset + 46 > bytes.length || view.getUint32(offset, true) !== 0x02014b50) {
-        throw new Error("تعذر قراءة قائمة الملفات داخل ZIP. تأكد أن الملف غير تالف.");
-      }
-      const nameLength = view.getUint16(offset + 28, true);
-      const extraLength = view.getUint16(offset + 30, true);
-      const commentLength = view.getUint16(offset + 32, true);
-      const start = offset + 46;
-      const end = start + nameLength;
-      if (end > bytes.length) throw new Error("قائمة الملفات داخل ZIP غير مكتملة.");
-      const name = decoder.decode(bytes.subarray(start, end));
-      if (/\.pdf$/i.test(name) && !name.endsWith("/")) {
-        pdfFiles++;
-        const base = name.split(/[\\/]/).pop()!.replace(/\.pdf$/i, "");
-        if (!/^\d{1,2}[-_.]\d{1,2}[-_.]\d{4}$/.test(base)) {
-          const matches = base.match(/(?<!\d)\d{3,4}(?!\d)/g) || [];
-          matches.forEach((room) => rooms.add(room.padStart(4, "0")));
-        }
-      }
-      offset = end + extraLength + commentLength;
+    const pdfFiles = files.filter((file) => file.name.toLowerCase().endsWith(".pdf"));
+    for (const file of pdfFiles) {
+      const base = file.name.replace(/\.pdf$/i, "");
+      if (/^\d{1,2}[-_.]\d{1,2}[-_.]\d{4}$/.test(base)) continue;
+      const matches = base.match(/(?<!\d)\d{3,4}(?!\d)/g) || [];
+      matches.forEach((room) => rooms.add(room.padStart(4, "0")));
     }
-    if (!pdfFiles) throw new Error("لم يتم العثور على ملفات PDF داخل ملف ZIP.");
-    return { rooms: [...rooms], pdfFiles };
+    return { rooms: [...rooms], pdfFiles: pdfFiles.length };
   }
 
   async function detectRCMissing() {
-    if (!rcResFile || !rcZipFile) { setRcMessage("من فضلك اختر تقرير RES_DETAIL.xml وملف ZIP الذي يحتوي على ملفات PDF."); return; }
-    if (!rcResFile.name.toLowerCase().endsWith(".xml") || !rcZipFile.name.toLowerCase().endsWith(".zip")) { setRcMessage("تأكد من اختيار تقرير XML وملف ZIP صحيح."); return; }
+    if (!rcResFile || !rcPdfFiles.length) { setRcMessage("من فضلك اختر تقرير RES_DETAIL.xml وحدد ملفات PDF."); return; }
+    if (!rcResFile.name.toLowerCase().endsWith(".xml") || rcPdfFiles.some((file) => !file.name.toLowerCase().endsWith(".pdf"))) { setRcMessage("تأكد من اختيار تقرير XML وملفات PDF فقط."); return; }
     setRcBusy(true);
-    setRcMessage("جارٍ قراءة أسماء ملفات PDF من ZIP...");
+    setRcMessage("جارٍ استخراج أرقام الغرف من أسماء ملفات PDF...");
     setRcMissingRooms([]);
     setRcSummary(null);
     try {
-      const { rooms, pdfFiles } = await extractPdfRoomsFromZip(rcZipFile);
-      setRcMessage("تم استخراج أرقام الغرف من " + pdfFiles + " ملف PDF. جارٍ مقارنتها بتقرير الوصول...");
+      const { rooms, pdfFiles } = extractPdfRoomsFromFiles(rcPdfFiles);
+      if (!pdfFiles) throw new Error("لم يتم العثور على ملفات PDF صالحة.");
+      setRcMessage("تم اختيار " + pdfFiles + " ملف PDF. جارٍ مقارنتها بتقرير الوصول...");
       const data = new FormData();
       data.append("resFile", rcResFile);
       data.append("pdfRooms", JSON.stringify(rooms));
@@ -1015,18 +989,18 @@ export default function Home() {
       ) : activeTool === "rc-missing" ? (
         <section className="panel">
           <h2>RC Missing</h2>
-          <p className="muted">ارفع تقرير الوصول RES_DETAIL.xml وملف ZIP الذي يحتوي على ملفات PDF. تستخرج الأداة أرقام الغرف المكونة من 3 أو 4 خانات من أسماء ملفات PDF، وتحول الرقم الثلاثي إلى أربعة أرقام بإضافة صفر في البداية، ثم تعرض غرف تقرير الوصول التي لا يوجد لها ملف PDF.</p>
+          <p className="muted">ارفع تقرير الوصول RES_DETAIL.xml وحدد ملفات PDF مباشرة (يمكن تحديد عدة ملفات دفعة واحدة). تستخرج الأداة أرقام الغرف المكونة من 3 أو 4 خانات من أسماء ملفات PDF، وتحول الرقم الثلاثي إلى أربعة أرقام بإضافة صفر في البداية، ثم تعرض غرف تقرير الوصول التي لا يوجد لها ملف PDF.</p>
           <div className="upload">
             <label htmlFor="rc-res-file">تقرير الوصول — RES_DETAIL.xml</label>
             <input id="rc-res-file" type="file" accept=".xml,text/xml,application/xml" onChange={(e) => { setRcResFile(e.target.files?.[0] ?? null); setRcMissingRooms([]); setRcSummary(null); setRcMessage(""); }} />
             {rcResFile && <div className="filename">تم الاختيار: {rcResFile.name}</div>}
           </div>
           <div className="upload">
-            <label htmlFor="rc-zip-file">ملف ZIP الذي يحتوي على ملفات PDF</label>
-            <input id="rc-zip-file" type="file" accept=".zip,application/zip" onChange={(e) => { setRcZipFile(e.target.files?.[0] ?? null); setRcMissingRooms([]); setRcSummary(null); setRcMessage(""); }} />
-            {rcZipFile && <div className="filename">تم الاختيار: {rcZipFile.name}</div>}
+            <label htmlFor="rc-pdf-files">ملفات PDF (يمكن تحديد عدة ملفات معًا)</label>
+            <input id="rc-pdf-files" type="file" accept=".pdf,application/pdf" multiple onChange={(e) => { setRcPdfFiles(Array.from(e.target.files || [])); setRcMissingRooms([]); setRcSummary(null); setRcMessage(""); }} />
+            {rcPdfFiles.length > 0 && <div className="filename">تم اختيار {rcPdfFiles.length} ملف PDF</div>}
           </div>
-          <button className="button" onClick={detectRCMissing} disabled={rcBusy || !rcResFile || !rcZipFile}>{rcBusy ? "جارٍ الفحص..." : "فحص الغرف الناقصة"}</button>
+          <button className="button" onClick={detectRCMissing} disabled={rcBusy || !rcResFile || !rcPdfFiles.length}>{rcBusy ? "جارٍ الفحص..." : "فحص الغرف الناقصة"}</button>
           {rcMessage && <div role="status" className="notice">{rcMessage}</div>}
           {rcSummary && (
             <div className="towel-results">
@@ -1035,7 +1009,7 @@ export default function Home() {
                 <div><strong>{rcSummary.totalRooms}</strong><span>إجمالي غرف الوصول</span></div>
                 <div><strong>{rcSummary.matchedRooms}</strong><span>غرف لها ملفات PDF</span></div>
                 <div><strong>{rcSummary.missingCount}</strong><span>غرف بدون PDF</span></div>
-                <div><strong>{rcSummary.pdfFiles}</strong><span>عدد ملفات PDF داخل ZIP</span></div>
+                <div><strong>{rcSummary.pdfFiles}</strong><span>عدد ملفات PDF المختارة</span></div>
               </div>
               <div className="section-heading">
                 <h3>الغرف التي لا يوجد لها PDF ({rcMissingRooms.length})</h3>
