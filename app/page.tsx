@@ -66,7 +66,7 @@ export default function Home() {
   const [rcResFile, setRcResFile] = useState<File | null>(null);
   const [rcPdfFiles, setRcPdfFiles] = useState<File[]>([]);
   const [rcMissingRooms, setRcMissingRooms] = useState<string[]>([]);
-  const [rcSummary, setRcSummary] = useState<{ totalRooms: number; matchedRooms: number; missingCount: number; pdfFiles: number; pdfRoomsCount: number; coExcludedCount: number } | null>(null);
+  const [rcSummary, setRcSummary] = useState<{ totalRooms: number; matchedRooms: number; missingCount: number; pdfFiles: number; pdfRoomsCount: number } | null>(null);
   const [rcBusy, setRcBusy] = useState(false);
   const [rcMessage, setRcMessage] = useState("");
 
@@ -528,7 +528,7 @@ export default function Home() {
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "تعذر فحص الملفات.");
       setRcMissingRooms(result.missingRooms || []);
-      setRcSummary({ totalRooms: result.totalRooms, matchedRooms: result.matchedRooms, missingCount: result.missingCount, pdfFiles: result.pdfFiles, pdfRoomsCount: result.pdfRoomsCount, coExcludedCount: result.coExcludedCount });
+      setRcSummary({ totalRooms: result.totalRooms, matchedRooms: result.matchedRooms, missingCount: result.missingCount, pdfFiles: result.pdfFiles, pdfRoomsCount: result.pdfRoomsCount });
       setRcMessage("اكتمل الفحص بنجاح.");
     } catch (error) {
       setRcMessage(error instanceof Error ? error.message : "حدث خطأ أثناء فحص RC Missing.");
@@ -989,7 +989,7 @@ export default function Home() {
       ) : activeTool === "rc-missing" ? (
         <section className="panel">
           <h2>RC Missing</h2>
-          <p className="muted">ارفع تقرير الوصول RES_DETAIL.xml وحدد ملفات PDF مباشرة (يمكن تحديد عدة ملفات دفعة واحدة). تستخرج الأداة أرقام الغرف المكونة من 3 أو 4 خانات من أسماء ملفات PDF، وتحول الرقم الثلاثي إلى أربعة أرقام بإضافة صفر في البداية. يتم استبعاد الغرف التي حالتها CO من المقارنة.</p>
+          <p className="muted">ارفع تقرير الوصول RES_DETAIL.xml وحدد ملفات PDF مباشرة (يمكن تحديد عدة ملفات دفعة واحدة). تستخرج الأداة أرقام الغرف المكونة من 3 أو 4 خانات من أسماء ملفات PDF، وتحول الرقم الثلاثي إلى أربعة أرقام بإضافة صفر في البداية، ثم تعرض غرف تقرير الوصول التي لا يوجد لها ملف PDF.</p>
           <div className="upload">
             <label htmlFor="rc-res-file">تقرير الوصول — RES_DETAIL.xml</label>
             <input id="rc-res-file" type="file" accept=".xml,text/xml,application/xml" onChange={(e) => { setRcResFile(e.target.files?.[0] ?? null); setRcMissingRooms([]); setRcSummary(null); setRcMessage(""); }} />
@@ -1006,11 +1006,10 @@ export default function Home() {
             <div className="towel-results">
               <h3>ملخص الفحص</h3>
               <div className="summary-grid">
-                <div><strong>{rcSummary.totalRooms}</strong><span>الغرف المطلوب لها PDF</span></div>
+                <div><strong>{rcSummary.totalRooms}</strong><span>إجمالي غرف الوصول</span></div>
                 <div><strong>{rcSummary.matchedRooms}</strong><span>غرف لها ملفات PDF</span></div>
                 <div><strong>{rcSummary.missingCount}</strong><span>غرف بدون PDF</span></div>
                 <div><strong>{rcSummary.pdfFiles}</strong><span>عدد ملفات PDF المختارة</span></div>
-                <div><strong>{rcSummary.coExcludedCount}</strong><span>غرف مستبعدة بحالة CO</span></div>
               </div>
               <div className="section-heading">
                 <h3>الغرف التي لا يوجد لها PDF ({rcMissingRooms.length})</h3>
