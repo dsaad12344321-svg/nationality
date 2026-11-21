@@ -24,7 +24,7 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [kind, setKind] = useState<"error" | "success" | "info">("info");
-  const [activeTool, setActiveTool] = useState<"nationality" | "towels" | "nationality-missing" | "missing-profile" | "manager-report" | "journal" | "guest-name-extractor">("nationality");
+  const [activeTool, setActiveTool] = useState<"nationality" | "towels" | "nationality-missing" | "missing-profile" | "manager-report" | "journal" | "rc-missing" | "guest-name-extractor">("nationality");
   const [managerTowelFile, setManagerTowelFile] = useState<File | null>(null);
   const [managerInhFile, setManagerInhFile] = useState<File | null>(null);
   const [managerNationalityFile, setManagerNationalityFile] = useState<File | null>(null);
@@ -63,6 +63,12 @@ export default function Home() {
   const [fixedChargeRows, setFixedChargeRows] = useState<{ room: string; guestName: string; code: string; description: string; price: string; quantity: string; frequency: string; beginDate: string; endDate: string }[]>([]);
   const [fixedChargeBusy, setFixedChargeBusy] = useState(false);
   const [fixedChargeMessage, setFixedChargeMessage] = useState("");
+  const [rcResFile, setRcResFile] = useState<File | null>(null);
+  const [rcZipFile, setRcZipFile] = useState<File | null>(null);
+  const [rcMissingRooms, setRcMissingRooms] = useState<string[]>([]);
+  const [rcSummary, setRcSummary] = useState<{ totalRooms: number; matchedRooms: number; missingCount: number; pdfFiles: number; pdfRoomsCount: number } | null>(null);
+  const [rcBusy, setRcBusy] = useState(false);
+  const [rcMessage, setRcMessage] = useState("");
 
   useEffect(() => {
     try {
@@ -491,6 +497,47 @@ export default function Home() {
     link.remove();
     URL.revokeObjectURL(url);
   }
+  async function detectRCMissing() {
+    if (!rcResFile || !rcZipFile) { setRcMessage("من فضلك اختر تقرير RES_DETAIL.xml وملف ZIP الذي يحتوي على ملفات PDF."); return; }
+    if (!rcResFile.name.toLowerCase().endsWith(".xml") || !rcZipFile.name.toLowerCase().endsWith(".zip")) { setRcMessage("تأكد من اختيار تقرير XML وملف ZIP صحيح."); return; }
+    setRcBusy(true);
+    setRcMessage("جارٍ مقارنة غرف تقرير الوصول بأسماء ملفات PDF...");
+    setRcMissingRooms([]);
+    setRcSummary(null);
+    try {
+      const data = new FormData();
+      data.append("resFile", rcResFile);
+      data.append("zipFile", rcZipFile);
+      const response = await fetch("/api/rc-missing", { method: "POST", body: data });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "تعذر فحص الملفات.");
+      setRcMissingRooms(result.missingRooms || []);
+      setRcSummary({ totalRooms: result.totalRooms, matchedRooms: result.matchedRooms, missingCount: result.missingCount, pdfFiles: result.pdfFiles, pdfRoomsCount: result.pdfRoomsCount });
+      setRcMessage("اكتمل الفحص بنجاح.");
+    } catch (error) {
+      setRcMessage(error instanceof Error ? error.message : "حدث خطأ أثناء فحص RC Missing.");
+    } finally { setRcBusy(false); }
+  }
+
+  async function copyRCMissingRooms() {
+    try {
+      await navigator.clipboard.writeText(rcMissingRooms.join(","));
+      setRcMessage("تم نسخ " + rcMissingRooms.length + " رقم غرفة.");
+    } catch { setRcMessage("تعذر النسخ تلقائيًا. يمكنك تحديد الأرقام ونسخها يدويًا."); }
+  }
+
+  function downloadRCMissingCsv() {
+    const csv = "\uFEFF" + ["Room", ...rcMissingRooms].map((value) => '"' + String(value).replace(/"/g, '""') + '"').join("\r\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "rc-missing-rooms.csv";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
   async function generateReport() {
     if (!natFile || (!roomInhFile && !manFile)) {
       setKind("error");
@@ -552,14 +599,14 @@ export default function Home() {
     <main className="page">
       <header className="hero">
         <p className="eyebrow">أداة التقارير الفندقية</p>
-        <h1>{activeTool === "nationality" ? "التقرير اليومي للجنسيات" : activeTool === "towels" ? "Missing Towel Detector" : activeTool === "nationality-missing" ? "Nationality missing detector" : activeTool === "missing-profile" ? "Missing Profile Detector" : activeTool === "manager-report" ? "Manager Report" : activeTool === "guest-name-extractor" ? "Guest Name Extractor" : "Journal Detector"}</h1>
-        <p>{activeTool === "nationality" ? "حوّل ملفات nat.xml وman.xml إلى تقرير Excel، ويمكن إضافة Guests INH - By Room لإنشاء تبويب تفاصيل الغرف." : activeTool === "towels" ? "ارفع تقرير الغرف لاستخراج أرقام الغرف التي لا تحتوي على Towel Card." : activeTool === "nationality-missing" ? "ارفع Guest INH By Nationality لاستخراج أرقام الغرف التي لا تحتوي على كود جنسية." : activeTool === "missing-profile" ? "قارن عدد Adults + Children بعدد الأسماء المسجلة في Main Profile وAccompanying Names." : activeTool === "manager-report" ? "تقرير موحد للغرف التي بها نقص في كروت الفوط أو الجنسية أو ملفات النزلاء." : activeTool === "guest-name-extractor" ? "ارفع Reservation Detail.xml لعرض الحجوزات والبحث في بيانات النزلاء." : "ارفع Journal by Cashier and Transaction Code لاستخراج الحركات، أو RES_DETAIL لاستخراج غرف الوصول التي لديها 1012 Fixed Charges."}</p>
+        <h1>{activeTool === "nationality" ? "التقرير اليومي للجنسيات" : activeTool === "towels" ? "Missing Towel Detector" : activeTool === "nationality-missing" ? "Nationality missing detector" : activeTool === "missing-profile" ? "Missing Profile Detector" : activeTool === "manager-report" ? "Manager Report" : activeTool === "guest-name-extractor" ? "Guest Name Extractor" : activeTool === "rc-missing" ? "RC Missing" : "Journal Detector"}</h1>
+        <p>{activeTool === "nationality" ? "حوّل ملفات nat.xml وman.xml إلى تقرير Excel، ويمكن إضافة Guests INH - By Room لإنشاء تبويب تفاصيل الغرف." : activeTool === "towels" ? "ارفع تقرير الغرف لاستخراج أرقام الغرف التي لا تحتوي على Towel Card." : activeTool === "nationality-missing" ? "ارفع Guest INH By Nationality لاستخراج أرقام الغرف التي لا تحتوي على كود جنسية." : activeTool === "missing-profile" ? "قارن عدد Adults + Children بعدد الأسماء المسجلة في Main Profile وAccompanying Names." : activeTool === "manager-report" ? "تقرير موحد للغرف التي بها نقص في كروت الفوط أو الجنسية أو ملفات النزلاء." : activeTool === "guest-name-extractor" ? "ارفع Reservation Detail.xml لعرض الحجوزات والبحث في بيانات النزلاء." : activeTool === "rc-missing" ? "قارن غرف تقرير RES_DETAIL مع أرقام الغرف الموجودة في أسماء ملفات PDF داخل ملف ZIP، واعرض الغرف التي لا يوجد لها PDF." : "ارفع Journal by Cashier and Transaction Code لاستخراج الحركات، أو RES_DETAIL لاستخراج غرف الوصول التي لديها 1012 Fixed Charges."}</p>
       </header>
 
       <section className="panel tool-picker">
         <label htmlFor="tool-select">اختر الأداة</label>
         <select id="tool-select" value={activeTool} onChange={(e) => {
-          setActiveTool(e.target.value as "nationality" | "towels" | "nationality-missing" | "missing-profile" | "manager-report" | "journal" | "guest-name-extractor");
+          setActiveTool(e.target.value as "nationality" | "towels" | "nationality-missing" | "missing-profile" | "manager-report" | "journal" | "rc-missing" | "guest-name-extractor");
         }}>
           <option value="nationality">التقرير اليومي للجنسيات</option>
           <option value="towels">Missing Towel Detector</option>
@@ -567,6 +614,7 @@ export default function Home() {
           <option value="missing-profile">Missing Profile Detector</option>
           <option value="manager-report">Manager Report</option>
           <option value="journal">Journal Detector</option>
+          <option value="rc-missing">RC Missing</option>
           <option value="guest-name-extractor">فتح Guest Name Extractor</option>
         </select>
       </section>
@@ -922,6 +970,42 @@ export default function Home() {
             </div>
           )}
         </section>
+      ) : activeTool === "rc-missing" ? (
+        <section className="panel">
+          <h2>RC Missing</h2>
+          <p className="muted">ارفع تقرير الوصول RES_DETAIL.xml وملف ZIP الذي يحتوي على ملفات PDF. تستخرج الأداة أرقام الغرف المكونة من 3 أو 4 خانات من أسماء ملفات PDF، وتحول الرقم الثلاثي إلى أربعة أرقام بإضافة صفر في البداية، ثم تعرض غرف تقرير الوصول التي لا يوجد لها ملف PDF.</p>
+          <div className="upload">
+            <label htmlFor="rc-res-file">تقرير الوصول — RES_DETAIL.xml</label>
+            <input id="rc-res-file" type="file" accept=".xml,text/xml,application/xml" onChange={(e) => { setRcResFile(e.target.files?.[0] ?? null); setRcMissingRooms([]); setRcSummary(null); setRcMessage(""); }} />
+            {rcResFile && <div className="filename">تم الاختيار: {rcResFile.name}</div>}
+          </div>
+          <div className="upload">
+            <label htmlFor="rc-zip-file">ملف ZIP الذي يحتوي على ملفات PDF</label>
+            <input id="rc-zip-file" type="file" accept=".zip,application/zip" onChange={(e) => { setRcZipFile(e.target.files?.[0] ?? null); setRcMissingRooms([]); setRcSummary(null); setRcMessage(""); }} />
+            {rcZipFile && <div className="filename">تم الاختيار: {rcZipFile.name}</div>}
+          </div>
+          <button className="button" onClick={detectRCMissing} disabled={rcBusy || !rcResFile || !rcZipFile}>{rcBusy ? "جارٍ الفحص..." : "فحص الغرف الناقصة"}</button>
+          {rcMessage && <div role="status" className="notice">{rcMessage}</div>}
+          {rcSummary && (
+            <div className="towel-results">
+              <h3>ملخص الفحص</h3>
+              <div className="summary-grid">
+                <div><strong>{rcSummary.totalRooms}</strong><span>إجمالي غرف الوصول</span></div>
+                <div><strong>{rcSummary.matchedRooms}</strong><span>غرف لها ملفات PDF</span></div>
+                <div><strong>{rcSummary.missingCount}</strong><span>غرف بدون PDF</span></div>
+                <div><strong>{rcSummary.pdfFiles}</strong><span>عدد ملفات PDF داخل ZIP</span></div>
+              </div>
+              <div className="section-heading">
+                <h3>الغرف التي لا يوجد لها PDF ({rcMissingRooms.length})</h3>
+                {rcMissingRooms.length > 0 && <div className="uploads">
+                  <button type="button" className="add-button" onClick={copyRCMissingRooms}>نسخ الأرقام</button>
+                  <button type="button" className="add-button" onClick={downloadRCMissingCsv}>تنزيل Excel / CSV</button>
+                </div>}
+              </div>
+              {rcMissingRooms.length > 0 ? <textarea readOnly value={rcMissingRooms.join(",")} rows={5} aria-label="الغرف التي لا يوجد لها PDF" /> : <p className="saved-hint">ممتاز! جميع غرف تقرير الوصول لها ملفات PDF مطابقة.</p>}
+            </div>
+          )}
+        </section>
       ) : (
         <section className="panel">
           <h2>Journal Detector</h2>
@@ -1011,7 +1095,7 @@ export default function Home() {
           </div>
         </section>
       )}
-      <p className="foot">{activeTool === "journal" ? "يمكن تنزيل نتائج Journal Detector و1012 Fixed Charges بصيغة CSV وفتحها مباشرة في Excel." : "التقرير يُنشأ عند الطلب بصيغة Excel (.xlsx)."}</p>
+      <p className="foot">{activeTool === "journal" ? "يمكن تنزيل نتائج Journal Detector و1012 Fixed Charges بصيغة CSV وفتحها مباشرة في Excel." : activeTool === "rc-missing" ? "يمكن نسخ أرقام الغرف الناقصة أو تنزيلها في ملف CSV لفتحها في Excel." : "التقرير يُنشأ عند الطلب بصيغة Excel (.xlsx)."}</p>
     </main>
   );
 }
