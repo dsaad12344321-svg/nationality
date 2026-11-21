@@ -41,7 +41,7 @@ function collect(node: XmlValue, key: string): XmlObject[] {
 
 function normalizeRoom(value: unknown): string {
   const room = String(value ?? "").trim();
-  return /^\d{3,4}$/.test(room) ? room.padStart(4, "0") : "";
+  return /^\\d{3,4}$/.test(room) ? room.padStart(4, "0") : "";
 }
 
 export async function POST(request: Request) {
@@ -52,7 +52,7 @@ export async function POST(request: Request) {
     const rawPdfFiles = form.get("pdfFiles");
 
     if (!(resFile instanceof File) || typeof rawPdfRooms !== "string" || typeof rawPdfFiles !== "string") {
-      return NextResponse.json({ error: "من فضلك ارفع تقرير RES_DETAIL.xml واختر ملف ZIP يحتوي على ملفات PDF." }, { status: 400 });
+      return NextResponse.json({ error: "من فضلك ارفع تقرير RES_DETAIL.xml واختر ملفات PDF." }, { status: 400 });
     }
     if (!resFile.name.toLowerCase().endsWith(".xml")) {
       return NextResponse.json({ error: "تقرير الوصول يجب أن يكون بصيغة XML." }, { status: 400 });
@@ -73,11 +73,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "لم يتم العثور على سجلات G_RESERVATION. تأكد أنك رفعت تقرير RES_DETAIL المستخدم في Journal Detector." }, { status: 404 });
     }
 
+    // In the Oracle RES_DETAIL export, the report column "Res. Status"
+    // is stored in XML as SHORT_RESV_STATUS.
     const statusKey = Object.keys(reservations[0]).find((key) =>
-      ["RES_STATUS", "RESSTATUS", "RESERVATION_STATUS", "RESERVATIONSTATUS"].includes(key.replace(/[.\\s-]/g, "").toUpperCase())
+      ["SHORT_RESV_STATUS", "RES_STATUS", "RESSTATUS", "RESERVATION_STATUS", "RESERVATIONSTATUS"].includes(
+        key.replace(/[.\\s-]/g, "").toUpperCase()
+      )
     );
     if (!statusKey) {
-      return NextResponse.json({ error: "لم أتمكن من تحديد عمود Res. Status داخل RES_DETAIL.xml. أرسل لي نسخة من التقرير لأحدد اسم الحقل الصحيح قبل اعتماد المقارنة." }, { status: 422 });
+      return NextResponse.json({ error: "لم أتمكن من تحديد حقل Res. Status داخل RES_DETAIL.xml." }, { status: 422 });
     }
 
     const eligibleReservations = reservations.filter((reservation) =>
@@ -96,7 +100,7 @@ export async function POST(request: Request) {
     try {
       suppliedRooms = JSON.parse(rawPdfRooms);
     } catch {
-      return NextResponse.json({ error: "تعذر قراءة قائمة الغرف المستخرجة من ZIP." }, { status: 400 });
+      return NextResponse.json({ error: "تعذر قراءة قائمة الغرف المستخرجة من أسماء ملفات PDF." }, { status: 400 });
     }
     if (!Array.isArray(suppliedRooms)) {
       return NextResponse.json({ error: "قائمة غرف ملفات PDF غير صالحة." }, { status: 400 });
