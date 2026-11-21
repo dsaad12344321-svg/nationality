@@ -79,7 +79,7 @@ function getZipPdfNames(bytes: Buffer): string[] {
 function roomsFromPdfName(name: string): string[] {
   const base = name.split(/[\\/]/).pop() || name;
   const withoutExtension = base.replace(/\.pdf$/i, "");
-  const matches = withoutExtension.match(/\d{3,4}/g) || [];
+  const matches = withoutExtension.match(/(?<!\d)\d{3,4}(?!\d)/g) || [];
   return matches.map(normalizeRoom).filter(Boolean);
 }
 
