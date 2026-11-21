@@ -39,72 +39,26 @@ function collect(node: XmlValue, key: string): XmlObject[] {
   return found;
 }
 
-function normalizeRoom(value: string): string {
-  const room = value.trim();
+function normalizeRoom(value: unknown): string {
+  const room = String(value ?? "").trim();
   return /^\d{3,4}$/.test(room) ? room.padStart(4, "0") : "";
-}
-
-/** Reads ZIP central-directory filenames without extracting PDF contents. */
-function getZipPdfNames(bytes: Buffer): string[] {
-  const minOffset = Math.max(0, bytes.length - 22 - 0xffff);
-  let eocd = -1;
-  for (let i = bytes.length - 22; i >= minOffset; i--) {
-    if (bytes.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
-  }
-  if (eocd < 0) throw new Error("ملف ZIP غير صالح أو لا يحتوي على فهرس ملفات قابل للقراءة.");
-
-  const entryCount = bytes.readUInt16LE(eocd + 10);
-  let offset = bytes.readUInt32LE(eocd + 16);
-  const names: string[] = [];
-
-  for (let index = 0; index < entryCount; index++) {
-    if (offset + 46 > bytes.length || bytes.readUInt32LE(offset) !== 0x02014b50) {
-      throw new Error("تعذر قراءة قائمة الملفات داخل ZIP. تأكد أن الملف غير تالف.");
-    }
-    const flags = bytes.readUInt16LE(offset + 8);
-    const nameLength = bytes.readUInt16LE(offset + 28);
-    const extraLength = bytes.readUInt16LE(offset + 30);
-    const commentLength = bytes.readUInt16LE(offset + 32);
-    const start = offset + 46;
-    const end = start + nameLength;
-    if (end > bytes.length) throw new Error("قائمة الملفات داخل ZIP غير مكتملة.");
-    const nameBytes = bytes.subarray(start, end);
-    const name = (flags & 0x0800) ? nameBytes.toString("utf8") : nameBytes.toString("utf8");
-    if (/\.pdf$/i.test(name) && !name.endsWith("/")) names.push(name);
-    offset = end + extraLength + commentLength;
-  }
-  return names;
-}
-
-function roomsFromPdfName(name: string): string[] {
-  const base = name.split(/[\\/]/).pop() || name;
-  const withoutExtension = base.replace(/\.pdf$/i, "");
-  // A filename consisting only of a calendar date is not a room-number source.
-  if (/^\d{1,2}[-_.]\d{1,2}[-_.]\d{4}$/.test(withoutExtension)) return [];
-  const matches = withoutExtension.match(/(?<!\d)\d{3,4}(?!\d)/g) || [];
-  return matches.map(normalizeRoom).filter(Boolean);
 }
 
 export async function POST(request: Request) {
   try {
     const form = await request.formData();
     const resFile = form.get("resFile");
-    const zipFile = form.get("zipFile");
+    const rawPdfRooms = form.get("pdfRooms");
+    const rawPdfFiles = form.get("pdfFiles");
 
-    if (!(resFile instanceof File) || !(zipFile instanceof File)) {
-      return NextResponse.json({ error: "من فضلك ارفع تقرير RES_DETAIL.xml وملف ZIP الذي يحتوي على ملفات PDF." }, { status: 400 });
+    if (!(resFile instanceof File) || typeof rawPdfRooms !== "string" || typeof rawPdfFiles !== "string") {
+      return NextResponse.json({ error: "من فضلك ارفع تقرير RES_DETAIL.xml واختر ملف ZIP يحتوي على ملفات PDF." }, { status: 400 });
     }
     if (!resFile.name.toLowerCase().endsWith(".xml")) {
       return NextResponse.json({ error: "تقرير الوصول يجب أن يكون بصيغة XML." }, { status: 400 });
     }
-    if (!zipFile.name.toLowerCase().endsWith(".zip")) {
-      return NextResponse.json({ error: "يجب رفع مجموعة ملفات PDF داخل ملف ZIP." }, { status: 400 });
-    }
     if (resFile.size > 20 * 1024 * 1024) {
       return NextResponse.json({ error: "حجم تقرير RES_DETAIL يجب ألا يتجاوز 20 ميجابايت." }, { status: 413 });
-    }
-    if (zipFile.size > 50 * 1024 * 1024) {
-      return NextResponse.json({ error: "حجم ملف ZIP يجب ألا يتجاوز 50 ميجابايت." }, { status: 413 });
     }
 
     let root: XmlValue;
@@ -127,18 +81,22 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "تمت قراءة التقرير، لكن لم يتم العثور على أرقام غرف مكونة من 3 أو 4 خانات." }, { status: 404 });
     }
 
-    let pdfNames: string[];
+    let suppliedRooms: unknown;
     try {
-      pdfNames = getZipPdfNames(Buffer.from(await zipFile.arrayBuffer()));
-    } catch (error) {
-      return NextResponse.json({ error: error instanceof Error ? error.message : "تعذر قراءة ملف ZIP." }, { status: 400 });
+      suppliedRooms = JSON.parse(rawPdfRooms);
+    } catch {
+      return NextResponse.json({ error: "تعذر قراءة قائمة الغرف المستخرجة من ZIP." }, { status: 400 });
+    }
+    if (!Array.isArray(suppliedRooms)) {
+      return NextResponse.json({ error: "قائمة غرف ملفات PDF غير صالحة." }, { status: 400 });
     }
 
-    if (!pdfNames.length) {
-      return NextResponse.json({ error: "لم يتم العثور على ملفات PDF داخل ملف ZIP." }, { status: 404 });
+    const pdfRooms = new Set(suppliedRooms.map(normalizeRoom).filter(Boolean));
+    const pdfFiles = Number(rawPdfFiles);
+    if (!Number.isInteger(pdfFiles) || pdfFiles < 0) {
+      return NextResponse.json({ error: "عدد ملفات PDF غير صالح." }, { status: 400 });
     }
 
-    const pdfRooms = new Set(pdfNames.flatMap(roomsFromPdfName));
     const missingRooms = reportRooms.filter((room) => !pdfRooms.has(room));
     const matchedRooms = reportRooms.length - missingRooms.length;
 
@@ -146,10 +104,9 @@ export async function POST(request: Request) {
       totalRooms: reportRooms.length,
       matchedRooms,
       missingCount: missingRooms.length,
-      pdfFiles: pdfNames.length,
+      pdfFiles,
       pdfRoomsCount: pdfRooms.size,
       missingRooms,
-      pdfRooms: [...pdfRooms].sort((a, b) => Number(a) - Number(b)),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "حدث خطأ أثناء فحص RC Missing.";
