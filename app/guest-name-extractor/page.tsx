@@ -8,6 +8,8 @@ type IndexedFile = {
   size: number; content: string; pages: string[]; file: File;
 };
 type SearchResult = IndexedFile & { matchedPages: number[] };
+type MsgAttachmentPreview = { name: string; type: string; blob: Blob; url: string; size: number };
+type MsgPreviewData = { subject: string; sender: string; senderEmail: string; to: string; cc: string; sent: string; bodyHtml: string; bodyText: string; attachments: MsgAttachmentPreview[] };
 
 type ArrivalRecord = { roomNo: string; name: string; confirmationNo: string; arrivalTime: string };
 
@@ -491,6 +493,10 @@ export default function GuestNameExtractorPage() {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [folderName, setFolderName] = useState("");
   const [selected, setSelected] = useState<SearchResult | null>(null);
+  const [msgPreview, setMsgPreview] = useState<MsgPreviewData | null>(null);
+  const [msgPreviewError, setMsgPreviewError] = useState("");
+  const [activeAttachment, setActiveAttachment] = useState<MsgAttachmentPreview | null>(null);
+  useEffect(() => () => { msgPreview?.attachments.forEach((attachment) => URL.revokeObjectURL(attachment.url)); }, [msgPreview]);
   const [currentPage, setCurrentPage] = useState(1);
   const [restoreComplete, setRestoreComplete] = useState(false);
   const [storageMessage, setStorageMessage] = useState("جارٍ استعادة المجلد المحفوظ...");
@@ -697,9 +703,73 @@ export default function GuestNameExtractorPage() {
     else if (!indexed.length) setError("تعذرت قراءة الملفات المحددة. تحقق من سلامة الملفات ثم حاول مرة أخرى.");
   }
 
+
   function openPreview(item: SearchResult) {
     setSelected(item);
     setCurrentPage(item.matchedPages[0] || 1);
+    setMsgPreview(null);
+    setMsgPreviewError("");
+    setActiveAttachment(null);
+    if (item.extension.toLowerCase() !== "msg") return;
+    void (async () => {
+      try {
+        const { MsgReader } = await import("@kenjiuno/msgreader-web-ng");
+        const reader = new MsgReader(await item.file.arrayBuffer());
+        const data = reader.getFileData() as unknown as Record<string, unknown>;
+        const recipients = Array.isArray(data.recipients) ? data.recipients as Array<Record<string, unknown>> : [];
+        const names = (kind: string) => recipients
+          .filter((recipient) => String(recipient.recipType || "to").toLowerCase() === kind)
+          .map((recipient) => String(recipient.name || recipient.email || "").trim())
+          .filter(Boolean).join("; ");
+        const attachmentRows = Array.isArray(data.attachments) ? data.attachments as Array<Record<string, unknown>> : [];
+        const msgReader = reader as unknown as {
+          getAttachment: (attachment: unknown) => { fileName?: string; content: Uint8Array };
+        };
+        const attachments: MsgAttachmentPreview[] = attachmentRows.map((row) => {
+          const extracted = msgReader.getAttachment(row);
+          const name = String(extracted.fileName || row.fileName || row.name || "attachment");
+          const extension = name.split(".").pop()?.toLowerCase() || "";
+          const mimeByExtension: Record<string, string> = {
+            pdf: "application/pdf", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
+            gif: "image/gif", webp: "image/webp", txt: "text/plain", csv: "text/csv",
+            html: "text/html", htm: "text/html",
+            docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          };
+          const mime = String(row.attachMimeTag || mimeByExtension[extension] || "application/octet-stream");
+          const blob = new Blob([new Uint8Array(extracted.content).buffer as ArrayBuffer], { type: mime });
+          return { name, type: mime, blob, url: URL.createObjectURL(blob), size: blob.size };
+        });
+        const html = typeof data.bodyHtml === "string" ? data.bodyHtml : "";
+        const safeHtml = html
+          .replace(/<script\\b[^>]*>[\\s\\S]*?<\\/script\\s*>/gi, "")
+          .replace(/\\s on[a-z]+\\s*=\\s*("[^"]*"|'[^']*'|[^\\s>]+)/gi, "")
+          .replace(/javascript\\s*:/gi, "");
+        const sentValue = data.messageDeliveryTime || data.clientSubmitTime || data.creationTime || "";
+        setMsgPreview({
+          subject: String(data.subject || item.name),
+          sender: String(data.senderName || data.senderEmail || ""),
+          senderEmail: String(data.senderEmail || ""),
+          to: names("to") || recipients.map((recipient) => String(recipient.name || "")).filter(Boolean).join("; "),
+          cc: names("cc"),
+          sent: sentValue ? new Date(String(sentValue)).toLocaleString() : "",
+          bodyHtml: safeHtml,
+          bodyText: typeof data.body === "string" ? data.body : "",
+          attachments,
+        });
+      } catch (error) {
+        setMsgPreviewError(error instanceof Error ? error.message : "تعذرت قراءة مرفقات رسالة Outlook.");
+      }
+    })();
+  }
+
+  function downloadMsgAttachment(attachment: MsgAttachmentPreview) {
+    const link = document.createElement("a");
+    link.href = attachment.url;
+    link.download = attachment.name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
   }
 
   function downloadOriginalMsg() {
@@ -934,18 +1004,47 @@ export default function GuestNameExtractorPage() {
           <span className="muted">من {selected.pages.length}</span>
         </div>}
         {selected.extension === "msg" ? (
-          <div style={{ border: "1px solid #c8d2df", borderRadius: 8, background: "#f7f9fc", padding: 24, textAlign: "center" }}>
-            <div style={{ fontSize: 42, marginBottom: 12 }}>✉️</div>
-            <h3 style={{ margin: "0 0 10px", color: "#1d2c42" }}>ملف Outlook الأصلي</h3>
-            <p style={{ margin: "0 auto 18px", maxWidth: 620, lineHeight: 1.8, color: "#526174" }}>
-              حفاظاً على مطابقة المراسلات الرسمية، لن نعيد تكوين الرسالة داخل الموقع. نزّل ملف MSG الأصلي وافتحه باستخدام Microsoft Outlook على جهازك لعرض الرسالة ومرفقاتها وطباعتها بالشكل الذي يعرضه Outlook.
-            </p>
-            <button type="button" className="add-button" onClick={downloadOriginalMsg}>تنزيل ملف Outlook الأصلي</button>
-            <p className="saved-hint" style={{ marginTop: 14 }}>
-              اسم الملف: <span dir="ltr">{selected.name}</span> · لم يتم تعديل محتوى الملف.
-            </p>
+          <div style={{ border: "1px solid #c8d2df", borderRadius: 8, overflow: "hidden", background: "#fff", color: "#253247", direction: "ltr", textAlign: "left" }}>
+            {msgPreviewError && <div role="alert" style={{ padding: 14, color: "#a12622", background: "#fff1f0" }}>{msgPreviewError}</div>}
+            {!msgPreview && !msgPreviewError && <p style={{ padding: 22 }}>جارٍ قراءة رسالة Outlook ومرفقاتها...</p>}
+            {msgPreview && <>
+              <div style={{ background: "#f2f5f9", borderBottom: "1px solid #d5dce5", padding: "18px 22px" }}>
+                <h3 style={{ margin: "0 0 14px", color: "#1d2c42" }}>{msgPreview.subject}</h3>
+                {[["From", msgPreview.sender + (msgPreview.senderEmail && msgPreview.senderEmail !== msgPreview.sender ? " <" + msgPreview.senderEmail + ">" : "")], ["To", msgPreview.to], ["Cc", msgPreview.cc], ["Sent", msgPreview.sent]].filter((row) => row[1]).map(([label, value]) => (
+                  <div key={label} style={{ display: "flex", gap: 12, padding: "3px 0", fontSize: 13 }}><strong style={{ width: 48, color: "#64748b" }}>{label}:</strong><span>{value}</span></div>
+                ))}
+              </div>
+              {msgPreview.attachments.length > 0 ? <div style={{ padding: "12px 18px", borderBottom: "1px solid #e0e5eb", background: "#fafbfd" }}>
+                <strong style={{ display: "block", marginBottom: 9 }}>المرفقات ({msgPreview.attachments.length})</strong>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {msgPreview.attachments.map((attachment, index) => (
+                    <div key={index} style={{ border: "1px solid #d6dee8", borderRadius: 7, padding: 9, minWidth: 190, maxWidth: 280, background: "white" }}>
+                      <div style={{ fontSize: 12, overflowWrap: "anywhere", marginBottom: 8 }}>📎 {attachment.name}<div style={{ color: "#778399", marginTop: 3 }}>{formatSize(attachment.size)}</div></div>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        <button type="button" className="add-button" onClick={() => setActiveAttachment(attachment)}>فتح / عرض</button>
+                        <button type="button" className="add-button" onClick={() => downloadMsgAttachment(attachment)}>تنزيل</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div> : <p style={{ padding: "12px 18px", margin: 0, color: "#64748b" }}>لا تحتوي الرسالة على مرفقات.</p>}
+              {activeAttachment && <div style={{ padding: 14, borderBottom: "1px solid #d5dce5", background: "#f4f7fb" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                  <strong>{activeAttachment.name}</strong>
+                  <button type="button" className="add-button" onClick={() => setActiveAttachment(null)}>إغلاق المرفق</button>
+                </div>
+                {activeAttachment.type.startsWith("image/") ? <img src={activeAttachment.url} alt={activeAttachment.name} style={{ maxWidth: "100%", maxHeight: 560, objectFit: "contain" }} /> :
+                  activeAttachment.type === "application/pdf" ? <iframe title={activeAttachment.name} src={activeAttachment.url + "#toolbar=1"} style={{ width: "100%", height: 600, border: 0, background: "white" }} /> :
+                  activeAttachment.type.startsWith("text/") ? <iframe title={activeAttachment.name} src={activeAttachment.url} style={{ width: "100%", height: 400, border: 0, background: "white" }} /> :
+                  <p>لا تتوفر معاينة داخلية لهذا النوع من الملفات. يمكنك تنزيله وفتحه بالبرنامج المناسب.</p>}
+              </div>}
+              <div style={{ padding: 22, minHeight: 180, fontFamily: "Arial,sans-serif", fontSize: 14, lineHeight: 1.55, overflowWrap: "anywhere" }}>
+                {msgPreview.bodyHtml ? <iframe title="محتوى رسالة Outlook" sandbox="" srcDoc={msgPreview.bodyHtml} style={{ width: "100%", minHeight: 360, border: 0, background: "white" }} /> :
+                  <pre style={{ whiteSpace: "pre-wrap", font: "inherit", margin: 0 }}>{msgPreview.bodyText || "لا يوجد محتوى نصي في الرسالة."}</pre>}
+              </div>
+            </>}
           </div>
-        ) : <div style={{ border: "1px solid #d7dee8", borderRadius: 10, overflow: "hidden", background: "#f3f5f7" }}>
+        ) : <div style={{ border: "1px solid #d7dee8", borderRadius: 10, overflow: "hidden", background: "#f3f5f7" }}>        ) : <div style={{ border: "1px solid #d7dee8", borderRadius: 10, overflow: "hidden", background: "#f3f5f7" }}>
           {selected.extension === "pdf" ? <iframe title="معاينة ملف PDF" src={previewUrl + "#page=" + currentPage + "&toolbar=1"}
             style={{ width: "100%", height: "75vh", maxHeight: 850, minHeight: 560, border: 0 }} /> :
             <pre style={{ whiteSpace: "pre-wrap", overflow: "auto", maxHeight: 600, padding: 18, direction: "rtl", background: "white" }}>{pageText || "لا يوجد نص قابل للعرض."}</pre>}
