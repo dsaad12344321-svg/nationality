@@ -842,7 +842,21 @@ export default function GuestNameExtractorPage() {
   const companies = useMemo(() => new Set(files.map((file) => file.company).filter((name) => name !== "غير محددة")).size, [files]);
   const totalSize = useMemo(() => files.reduce((sum, file) => sum + file.size, 0), [files]);
   const pageText = selected?.pages[currentPage - 1] || "";
-  const extractedPeople = useMemo(() => extractPeople(pageText, query, selected?.company || ""), [pageText, query, selected?.company]);
+  // AllTours booking references can be found on a different page from the
+  // guest table. Parse the complete MSG/PDF page set for this company so a
+  // search by voucher number still displays every guest in that booking.
+  const peopleSourceText = selected && (
+    /alltour/i.test(selected.company)
+    || selected.pages.some((page) =>
+      /HOTEL\\s+RESERVATION\\s+FORM/i.test(page)
+      && /SURNAME,\\s*NAME/i.test(page)
+      && /VOUCHER\\s+NR/i.test(page),
+    )
+  ) ? selected.pages.join("\\n") : pageText;
+  const extractedPeople = useMemo(
+    () => extractPeople(peopleSourceText, query, selected?.company || ""),
+    [peopleSourceText, query, selected?.company],
+  );
 
   async function uploadArrivalReport(selectedFiles: FileList | null) {
     const file = selectedFiles?.[0];
