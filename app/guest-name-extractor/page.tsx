@@ -189,7 +189,7 @@ export default function GuestNameExtractorPage() {
           fileName: selected.name,
           company: selected.company,
           page: currentPage,
-          pageSize: page.getViewport({ scale: 1 }).view,
+          pageSize: (() => { const viewport = page.getViewport({ scale: 1 }); return { width: viewport.width, height: viewport.height }; })(),
           extractedText: pageText,
           textItemsWithCoordinates: items,
         };
