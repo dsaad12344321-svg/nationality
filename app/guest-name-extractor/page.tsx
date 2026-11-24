@@ -142,16 +142,39 @@ function extractPeople(text: string, searchTerm: string) {
   // MRS, SURNAME GIVEN-NAME (Citizenship), DD/MM/YYYY, (Age), Passport: ...
   // Parse complete guest rows so footer dates and other numbers are ignored.
   const anexAlternativeRows = /\b(?:MRS|MR|MS|MISS|MSTR|CHD|INF|ADT|ADULT|CHILD)\s*,?\s*([A-Z][A-Z\s.'’-]{1,65}?)\s*\([^)]+\)\s*,\s*(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})\s*,\s*\(\d{1,3}\)\s*,\s*Passport\s*:/gi;
-  const alternativePeople = Array.from(clean.matchAll(anexAlternativeRows), (match) => ({
-    name: titleCaseAnexName(match[1]),
-    dob: match[2].replace(/[.-]/g, "/"),
-  }));
+  // A page can contain several bookings. Associate each guest with the closest
+  // preceding Res.No / Reservation No marker so a search returns the whole booking.
+  const reservationMarkers = Array.from(
+    clean.matchAll(/\b(?:Res\.?\s*No\.?|Reservation\s*No\.?)\s*[:#-]?\s*([A-Z0-9/-]+)/gi),
+    (match) => ({ index: match.index ?? 0, number: normalize(match[1]) }),
+  );
+  const alternativePeople = Array.from(clean.matchAll(anexAlternativeRows), (match) => {
+    const guestIndex = match.index ?? 0;
+    const reservation = [...reservationMarkers].reverse().find((marker) => marker.index <= guestIndex);
+    return {
+      name: titleCaseAnexName(match[1]),
+      dob: match[2].replace(/[.-]/g, "/"),
+      reservationNo: reservation?.number ?? "",
+    };
+  });
   if (alternativePeople.length) {
-    // When the user searched for a guest, show only matching guests from this voucher page.
     const normalizedSearch = normalize(searchTerm);
-    return normalizedSearch
-      ? alternativePeople.filter((person) => normalize(person.name).includes(normalizedSearch))
-      : alternativePeople;
+    if (!normalizedSearch) {
+      return alternativePeople.map(({ name, dob }) => ({ name, dob }));
+    }
+
+    const matchingPeople = alternativePeople.filter((person) =>
+      normalize(person.name).includes(normalizedSearch),
+    );
+    const matchingReservations = new Set(
+      matchingPeople.map((person) => person.reservationNo).filter(Boolean),
+    );
+
+    // Include every guest assigned to the same reservation as a matched guest.
+    return alternativePeople
+      .filter((person) => matchingPeople.includes(person) ||
+        (person.reservationNo && matchingReservations.has(person.reservationNo)))
+      .map(({ name, dob }) => ({ name, dob }));
   }
 
   // Anex primary voucher: table with Clients names, citizenship / Date of born / Age.
