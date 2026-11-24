@@ -197,6 +197,18 @@ function extractPeople(text: string, searchTerm: string) {
       return alternativePeople.map(({ name, dob }) => ({ name, dob }));
     }
 
+    // A 7- or 8-digit query is treated as an Anex reservation number.
+    // Return every guest belonging to that exact reservation only.
+    const reservationQuery = normalizedSearch.replace(/\\s+/g, "");
+    if (/^\\d{7,8}$/.test(reservationQuery)) {
+      const matchingReservation = bookingGroups.find(
+        (group) => group.reservationNo === reservationQuery,
+      );
+      return matchingReservation
+        ? matchingReservation.people.map(({ name, dob }) => ({ name, dob }))
+        : [];
+    }
+
     // Find the booking containing the searched guest, then return all guests
     // from that same booking (not guests from adjacent reservations).
     // Match both the original surname-first spelling and the display spelling
@@ -533,10 +545,10 @@ export default function GuestNameExtractorPage() {
 
       {files.length > 0 && <>
         <section className="panel">
-          <h2>2. البحث بالاسم أو الشركة</h2>
-          <p className="muted">ستظهر الملفات والصفحات المطابقة. اضغط على معاينة لعرض الصفحة واستخراج الاسم وتاريخ الميلاد منها.</p>
+          <h2>2. البحث بالاسم أو الشركة أو رقم الحجز</h2>
+          <p className="muted">ستظهر الملفات والصفحات المطابقة. يمكنك البحث باسم النزيل أو اسم الشركة أو رقم الحجز. عند البحث برقم الحجز ستظهر بيانات جميع النزلاء المرتبطين به.</p>
           <input value={query} onChange={(event) => setQuery(event.target.value)}
-            placeholder="اكتب اسم النزيل أو اسم الشركة..." aria-label="البحث باسم النزيل أو الشركة"
+            placeholder="اكتب اسم النزيل أو اسم الشركة أو رقم الحجز..." aria-label="البحث باسم النزيل أو الشركة أو رقم الحجز"
             style={{ width: "100%", minHeight: 50, border: "1px solid #cbd6e2", borderRadius: 10, padding: "10px 14px", font: "inherit" }} />
           <div className="folder-stats">
             <div><strong>{files.length}</strong><span>ملف تمت قراءته</span></div>
