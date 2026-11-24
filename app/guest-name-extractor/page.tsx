@@ -248,7 +248,7 @@ function extractPeople(text: string, searchTerm: string) {
   if (isPegasVoucher) {
     const pegasRowPattern = /\b(MRS|MR|MS|MISS|MSTR|MISTER|MASTER)\s+([\p{L}][\p{L}'’.-]{1,45})\s+([\p{L}][\p{L}'’.-]{1,45}(?:\s+[\p{L}][\p{L}'’.-]{1,45}){0,3})\s+(\d{1,2}[./-]\d{1,2}[./-]\d{4})\b/giu;
     const pegasPeople = Array.from(clean.matchAll(pegasRowPattern), (match) => ({
-      name: [match[1], match[2], match[3]].join(" ").toLocaleUpperCase(),
+      name: titleCaseName([match[1], match[2], match[3]].join(" ")),
       dob: match[4].replace(/[/-]/g, "."),
     }));
     if (pegasPeople.length) return pegasPeople;
