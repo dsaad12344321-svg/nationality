@@ -8,6 +8,65 @@ type IndexedFile = {
 };
 type SearchResult = IndexedFile & { matchedPages: number[] };
 
+const GUEST_DB_NAME = "nationality-guest-files";
+const GUEST_DB_VERSION = 1;
+const GUEST_STORE_NAME = "files";
+const GUEST_STATE_KEY = "nationality-guest-extractor-state-v1";
+
+function openGuestFilesDB(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(GUEST_DB_NAME, GUEST_DB_VERSION);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(GUEST_STORE_NAME)) {
+        db.createObjectStore(GUEST_STORE_NAME, { keyPath: "id" });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("تعذر فتح قاعدة البيانات المحلية."));
+  });
+}
+
+async function saveGuestFiles(files: IndexedFile[]): Promise<void> {
+  const db = await openGuestFilesDB();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(GUEST_STORE_NAME, "readwrite");
+    const store = transaction.objectStore(GUEST_STORE_NAME);
+    store.clear();
+    for (const file of files) store.put(file);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error || new Error("تعذر حفظ الملفات."));
+    transaction.onabort = () => reject(transaction.error || new Error("تم إلغاء حفظ الملفات."));
+  });
+  db.close();
+}
+
+async function loadGuestFiles(): Promise<IndexedFile[]> {
+  const db = await openGuestFilesDB();
+  const files = await new Promise<IndexedFile[]>((resolve, reject) => {
+    const transaction = db.transaction(GUEST_STORE_NAME, "readonly");
+    const request = transaction.objectStore(GUEST_STORE_NAME).getAll();
+    request.onsuccess = () => resolve((request.result || []) as IndexedFile[]);
+    request.onerror = () => reject(request.error || new Error("تعذر استعادة الملفات."));
+  });
+  db.close();
+  return files.filter((item) => item.file instanceof Blob).map((item) => ({
+    ...item,
+    file: item.file instanceof File ? item.file : new File([item.file], item.name, { type: item.file.type }),
+  }));
+}
+
+async function clearGuestFiles(): Promise<void> {
+  const db = await openGuestFilesDB();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(GUEST_STORE_NAME, "readwrite");
+    transaction.objectStore(GUEST_STORE_NAME).clear();
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error || new Error("تعذر حذف الملفات المحفوظة."));
+  });
+  db.close();
+}
+
 const SUPPORTED = new Set(["pdf", "docx", "msg", "txt", "csv", "xml", "html", "htm", "eml", "log"]);
 const normalize = (value: string) =>
   value.toLocaleLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
@@ -101,7 +160,62 @@ export default function GuestNameExtractorPage() {
   const [folderName, setFolderName] = useState("");
   const [selected, setSelected] = useState<SearchResult | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
+  const [restoreComplete, setRestoreComplete] = useState(false);
+  const [storageMessage, setStorageMessage] = useState("جارٍ استعادة المجلد المحفوظ...");
   const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    let active = true;
+    async function restoreSession() {
+      try {
+        const [savedFiles, savedStateText] = await Promise.all([
+          loadGuestFiles(),
+          Promise.resolve(localStorage.getItem(GUEST_STATE_KEY)),
+        ]);
+        if (!active) return;
+        const savedState = savedStateText ? JSON.parse(savedStateText) : {};
+        setFiles(savedFiles);
+        setFolderName(String(savedState.folderName || (savedFiles[0]?.path.split("/")[0] ?? "")));
+        const savedQuery = String(savedState.query || "");
+        setQuery(savedQuery);
+        const savedPage = Math.max(1, Number(savedState.currentPage) || 1);
+        setCurrentPage(savedPage);
+        if (savedState.selectedId) {
+          const item = savedFiles.find((file) => file.id === savedState.selectedId);
+          if (item) {
+            const q = normalize(savedQuery);
+            const matchedPages = item.pages.reduce<number[]>((acc, page, index) => {
+              if (normalize([item.name, item.path, item.company, page].join(" ")).includes(q)) acc.push(index + 1);
+              return acc;
+            }, []);
+            setSelected({ ...item, matchedPages: matchedPages.length ? matchedPages : [1] });
+            setCurrentPage(Math.min(savedPage, Math.max(1, item.pages.length)));
+          }
+        }
+        setStorageMessage(savedFiles.length
+          ? `تم استعادة ${savedFiles.length.toLocaleString("en-US")} ملف من ذاكرة المتصفح.`
+          : "لا يوجد مجلد محفوظ حاليًا. اختر مجلد الحجوزات للبدء.");
+      } catch {
+        if (active) setStorageMessage("تعذرت استعادة المجلد المحفوظ. قد تكون بيانات الموقع قد مُسحت أو مساحة التخزين غير متاحة.");
+      } finally {
+        if (active) setRestoreComplete(true);
+      }
+    }
+    void restoreSession();
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!restoreComplete) return;
+    try {
+      localStorage.setItem(GUEST_STATE_KEY, JSON.stringify({
+        folderName,
+        query,
+        selectedId: selected?.id || null,
+        currentPage,
+      }));
+    } catch { /* تجاهل تعذر حفظ حالة العرض */ }
+  }, [restoreComplete, folderName, query, selected, currentPage]);
+
   const previewUrl = useMemo(() => selected ? URL.createObjectURL(selected.file) : "", [selected]);
   useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
 
@@ -144,6 +258,12 @@ export default function GuestNameExtractorPage() {
       } catch { failed.push(path); }
       setProgress({ done: index + 1, total: readable.length });
     }
+    try {
+      await saveGuestFiles(indexed);
+      setStorageMessage(`تم حفظ ${indexed.length.toLocaleString("en-US")} ملف محليًا في المتصفح. لن تحتاج إلى اختيار المجلد بعد Refresh.`);
+    } catch {
+      setStorageMessage("تم فحص الملفات لهذه الجلسة، لكن تعذر حفظها بشكل دائم. قد تكون مساحة التخزين غير كافية.");
+    }
     setFiles(indexed); setWarnings(failed); setBusy(false);
     if (!readable.length) setError("لم أجد ملفات مدعومة داخل المجلد. الملفات المدعومة: PDF وWord DOCX وOutlook MSG وTXT وCSV وXML.");
     else if (!indexed.length) setError("تعذرت قراءة الملفات المحددة. تحقق من سلامة الملفات ثم حاول مرة أخرى.");
@@ -152,6 +272,23 @@ export default function GuestNameExtractorPage() {
   function openPreview(item: SearchResult) {
     setSelected(item);
     setCurrentPage(item.matchedPages[0] || 1);
+  }
+
+  async function removeSavedFolder() {
+    if (!window.confirm("هل تريد حذف نسخة المجلد المحفوظة من هذا المتصفح؟ لن يتم حذف الملفات الأصلية من جهازك.")) return;
+    try {
+      await clearGuestFiles();
+      localStorage.removeItem(GUEST_STATE_KEY);
+      setFiles([]);
+      setQuery("");
+      setSelected(null);
+      setCurrentPage(1);
+      setFolderName("");
+      setWarnings([]);
+      setStorageMessage("تم حذف المجلد المحفوظ من المتصفح.");
+    } catch {
+      setStorageMessage("تعذر حذف المجلد المحفوظ. حاول مرة أخرى.");
+    }
   }
 
   function printOriginal() {
@@ -239,11 +376,13 @@ export default function GuestNameExtractorPage() {
           <button type="button" className="add-button" onClick={() => inputRef.current?.click()} disabled={busy}>
             {busy ? "جارٍ فحص المجلد..." : "اختيار مجلد"}
           </button>
+          {files.length > 0 && <button type="button" className="add-button" onClick={() => void removeSavedFolder()} disabled={busy}>حذف المجلد المحفوظ</button>}
           <input ref={inputRef} type="file" multiple hidden
             {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
             onChange={(event) => { void scanFolder(event.currentTarget.files); event.currentTarget.value = ""; }} />
         </div>
         {folderName && <div className="filename">المجلد: {folderName}</div>}
+        <p className="saved-hint" role="status">{storageMessage}</p>
         {busy && <div className="folder-progress" role="status">
           <div className="progress-track"><span style={{ width: progress.total ? (progress.done / progress.total * 100) + "%" : "0%" }} /></div>
           <p className="saved-hint">جارٍ فحص الملفات: {progress.done} من {progress.total}</p>
