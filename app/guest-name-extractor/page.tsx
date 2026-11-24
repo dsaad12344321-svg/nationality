@@ -213,7 +213,7 @@ function extractPeople(text: string, searchTerm: string) {
     // from that same booking (not guests from adjacent reservations).
     // Match both the original surname-first spelling and the display spelling
     // (Anex commonly prints SURNAME GIVEN-NAME, while the UI reverses the order).
-    const matchesGuest = (person: (typeof alternativePeople)[number]) => {
+    const matchesGuest = (person: { sourceName: string; name: string; dob: string }) => {
       const source = normalize(person.sourceName || "");
       const display = normalize(person.name);
       const sourceTokens = source.split(/\\s+/).filter(Boolean);
