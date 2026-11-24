@@ -21,49 +21,86 @@ async function extractArrivalReport(file: File): Promise<ArrivalRecord[]> {
   for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
     const page = await pdf.getPage(pageNumber);
     const content = await page.getTextContent();
-    const rows: { y: number; x: number; text: string }[] = [];
+    const items: { y: number; x: number; text: string }[] = [];
+
     for (const item of content.items) {
       if (!("str" in item) || !item.str.trim() || !("transform" in item)) continue;
-      rows.push({ y: Math.round(item.transform[5] * 2) / 2, x: item.transform[4], text: item.str.trim() });
+      items.push({
+        y: item.transform[5],
+        x: item.transform[4],
+        text: item.str.trim(),
+      });
     }
+
+    // PMS reports may position cells on slightly different baselines.
+    // A wider tolerance keeps Room No. + Name + Company on the same row.
     const grouped: { y: number; items: { x: number; text: string }[] }[] = [];
-    for (const item of rows) {
-      let line = grouped.find((entry) => Math.abs(entry.y - item.y) <= 2);
-      if (!line) { line = { y: item.y, items: [] }; grouped.push(line); }
+    for (const item of items) {
+      let line = grouped.find((entry) => Math.abs(entry.y - item.y) <= 5);
+      if (!line) {
+        line = { y: item.y, items: [] };
+        grouped.push(line);
+      }
       line.items.push({ x: item.x, text: item.text });
     }
+
     const lines = grouped
       .sort((a, b) => b.y - a.y)
-      .map((line) => line.items.sort((a, b) => a.x - b.x).map((item) => item.text).join(" ").replace(/\\s+/g, " ").trim());
+      .map((line) =>
+        line.items
+          .sort((a, b) => a.x - b.x)
+          .map((item) => item.text)
+          .join(" ")
+          .replace(/\s+/g, " ")
+          .trim(),
+      );
 
-    let current: Partial<ArrivalRecord> | null = null;
-    const finish = () => {
-      if (current?.roomNo && current.name && current.confirmationNo && current.arrivalTime) {
-        records.push(current as ArrivalRecord);
-      }
+    const isRoomLine = (line: string) => {
+      const match = line.match(/^(\d{3,5})\s+(.+)$/);
+      return Boolean(match && match[2].includes(",") && !/^\d{5,9}\b/.test(match[2]));
     };
 
-    for (const line of lines) {
-      const roomLine = line.match(/^(\\d{3,5})\\s+(.+?)\\s+T\\s*-/i);
-      if (roomLine) {
-        finish();
-        current = {
-          roomNo: String(Number(roomLine[1])),
-          name: roomLine[2].trim().replace(/\\s+/g, " "),
-        };
-        continue;
+    for (let index = 0; index < lines.length; index++) {
+      const roomLine = lines[index].match(/^(\d{3,5})\s+(.+)$/);
+      if (!roomLine || !roomLine[2].includes(",")) continue;
+
+      const rowText = roomLine[2];
+      const companyMarker = rowText.search(/\s+T\s*-/i);
+      let guestName = companyMarker >= 0 ? rowText.slice(0, companyMarker).trim() : "";
+      if (!guestName) {
+        const titledName = rowText.match(/^(.+?,\s*(?:Mr|Mrs|Ms|Miss|Mstr|Master)\.?)\b/i);
+        if (titledName) guestName = titledName[1].trim();
       }
-      if (!current) continue;
-      if (!current.confirmationNo) {
-        const conf = line.match(/^\\s*(\\d{5,9})(?=\\s|$)/);
-        if (conf) current.confirmationNo = conf[1];
+      if (!guestName) continue;
+
+      let confirmationNo = "";
+      let arrivalTime = "";
+
+      // Conf No. and Arr. Time are printed on the following visual row.
+      // Search a few lines ahead because PDF text extraction can split cells.
+      for (let next = index + 1; next < Math.min(index + 5, lines.length); next++) {
+        if (isRoomLine(lines[next])) break;
+
+        if (!confirmationNo) {
+          const conf = lines[next].match(/^\s*(\d{5,9})(?=\s|$)/);
+          if (conf) confirmationNo = conf[1];
+        }
+        if (!arrivalTime) {
+          const time = lines[next].match(/\b([01]?\d|2[0-3]):[0-5]\d\b/);
+          if (time) arrivalTime = time[0].padStart(5, "0");
+        }
+        if (confirmationNo && arrivalTime) break;
       }
-      if (!current.arrivalTime) {
-        const time = line.match(/\\b([01]?\\d|2[0-3]):[0-5]\\d\\b/);
-        if (time) current.arrivalTime = time[0].padStart(5, "0");
+
+      if (confirmationNo && arrivalTime) {
+        records.push({
+          roomNo: roomLine[1], // Keep leading zeroes, e.g. 0321.
+          name: guestName.replace(/\s+/g, " "),
+          confirmationNo,
+          arrivalTime,
+        });
       }
     }
-    finish();
   }
 
   const unique = new Map<string, ArrivalRecord>();
