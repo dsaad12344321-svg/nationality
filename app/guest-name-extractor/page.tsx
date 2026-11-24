@@ -338,6 +338,48 @@ function extractPeople(text: string, searchTerm: string, company = "") {
     if (alltourPeople.length) return alltourPeople;
   }
 
+  // Biblio Globus reservation emails list each guest name followed by DOB
+  // under the "Names / Date of birth" headings. The reservation reference
+  // identifies the whole booking, so searching its number returns all guests.
+  const isBiblioBooking = /^biblio(?:\s*globus)?$/i.test(company.trim())
+    || (/Biblio\s+Globus/i.test(text)
+      && /\bRef\s*#/i.test(text)
+      && /\bDate\s+of\s+birth\b/i.test(text)
+      && /\bNames\b/i.test(text));
+  if (isBiblioBooking) {
+    const reference = text.match(/\bRef\s*#\s*([\w-]+)/i)?.[1] || "";
+    const section = text.match(/\bNames\b[\s\S]*?\bDate\s+of\s+birth\b([\s\S]*?)(?=\bIn\s+respect\s+of\s+our\s+guests\b|\bThanks\s+and\s+Best\s+regards\b|$)/i)?.[1] || "";
+    const biblioRowPattern = /([\\p{L}][\\p{L}'’.-]*(?:\\s+[\\p{L}][\\p{L}'’.-]*){0,5}\\s*\\/\\s*(?:MR|MRS|MS|MISS|CHLD|CHD|INF|MSTR))\\s+(\\d{1,2}[./-]\\d{1,2}[./-]\\d{4})\\b/giu;
+    const biblioPeople = Array.from(section.matchAll(biblioRowPattern), (match) => {
+      const rawName = match[1].trim();
+      const nameAndTitle = rawName.match(/^([\\s\\S]+?)\\s*\\/\\s*(MR|MRS|MS|MISS|CHLD|CHD|INF|MSTR)$/i);
+      const displayName = nameAndTitle
+        ? titleCaseName(nameAndTitle[1]) + " /" + nameAndTitle[2][0].toUpperCase() + nameAndTitle[2].slice(1).toLowerCase()
+        : titleCaseName(rawName);
+      return {
+        name: displayName,
+        dob: match[2].replace(/[/-]/g, "."),
+      };
+    });
+    if (biblioPeople.length) {
+      const normalizedSearch = normalize(searchTerm);
+      const normalizedReference = normalize(reference);
+      const queryAsReference = normalizedSearch.replace(/\\s+/g, "");
+      if (!normalizedSearch || (normalizedReference && queryAsReference === normalizedReference.replace(/\\s+/g, ""))) {
+        return biblioPeople;
+      }
+      const matchingGuest = biblioPeople.some((person) => {
+        const name = normalize(person.name);
+        const tokens = normalizedSearch.split(/\\s+/).filter(Boolean);
+        return name.includes(normalizedSearch)
+          || (tokens.length > 0 && tokens.every((token) =>
+            name.split(/\\s+/).some((part) => part.includes(token)),
+          ));
+      });
+      return matchingGuest ? biblioPeople : [];
+    }
+  }
+
   // EasyJet bookings arrive as Outlook MSG files. Guest names are in the
   // email body under "Names: Age"; the attached PDF is not the source.
   if (/^easy\s*jet$/i.test(company.trim())) {
