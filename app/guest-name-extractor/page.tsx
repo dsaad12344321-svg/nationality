@@ -852,7 +852,7 @@ export default function GuestNameExtractorPage() {
       && /SURNAME,\\s*NAME/i.test(page)
       && /VOUCHER\\s+NR/i.test(page),
     )
-  ) ? selected.pages.join("\\n") : pageText;
+  ) ? selected.pages.join("\\n\\n--- ALLTOUR PAGE BREAK ---\\n\\n"): pageText;
   const extractedPeople = useMemo(
     () => extractPeople(peopleSourceText, query, selected?.company || ""),
     [peopleSourceText, query, selected?.company],
