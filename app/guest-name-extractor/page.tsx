@@ -12,6 +12,17 @@ const GUEST_DB_NAME = "nationality-guest-files";
 const GUEST_DB_VERSION = 1;
 const GUEST_STORE_NAME = "files";
 const GUEST_STATE_KEY = "nationality-guest-extractor-state-v1";
+async function readBrowserStorageEstimate(): Promise<{ usage: number; quota: number } | null> {
+  if (typeof navigator === "undefined" || !navigator.storage?.estimate) return null;
+  const estimate = await navigator.storage.estimate();
+  if (typeof estimate.quota !== "number") return null;
+  return { usage: estimate.usage ?? 0, quota: estimate.quota };
+}
+
+function formatStorageMB(bytes: number) {
+  return (bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1) + "MB";
+}
+
 
 function openGuestFilesDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -180,9 +191,20 @@ export default function GuestNameExtractorPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [restoreComplete, setRestoreComplete] = useState(false);
   const [storageMessage, setStorageMessage] = useState("جارٍ استعادة المجلد المحفوظ...");
+  const [browserStorage, setBrowserStorage] = useState<{ usage: number; quota: number } | null>(null);
+
+  async function refreshBrowserStorage() {
+    try {
+      const estimate = await readBrowserStorageEstimate();
+      setBrowserStorage(estimate);
+    } catch {
+      setBrowserStorage(null);
+    }
+  }
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     let active = true;
+    void refreshBrowserStorage();
     async function restoreSession() {
       try {
         const [savedFiles, savedStateText] = await Promise.all([
@@ -192,6 +214,7 @@ export default function GuestNameExtractorPage() {
         if (!active) return;
         const savedState = savedStateText ? JSON.parse(savedStateText) : {};
         setFiles(savedFiles);
+        void refreshBrowserStorage();
         setFolderName(String(savedState.folderName || (savedFiles[0]?.path.split("/")[0] ?? "")));
         const savedQuery = String(savedState.query || "");
         setQuery(savedQuery);
@@ -278,6 +301,7 @@ export default function GuestNameExtractorPage() {
     }
     try {
       await saveGuestFiles(indexed);
+      await refreshBrowserStorage();
       setStorageMessage(`تم حفظ ${indexed.length.toLocaleString("en-US")} ملف محليًا في المتصفح. لن تحتاج إلى اختيار المجلد بعد Refresh.`);
     } catch {
       setStorageMessage("تم فحص الملفات لهذه الجلسة، لكن تعذر حفظها بشكل دائم. قد تكون مساحة التخزين غير كافية.");
@@ -296,6 +320,7 @@ export default function GuestNameExtractorPage() {
     if (!window.confirm("هل تريد حذف نسخة المجلد المحفوظة من هذا المتصفح؟ لن يتم حذف الملفات الأصلية من جهازك.")) return;
     try {
       await clearGuestFiles();
+      await refreshBrowserStorage();
       localStorage.removeItem(GUEST_STATE_KEY);
       setFiles([]);
       setQuery("");
@@ -382,6 +407,22 @@ export default function GuestNameExtractorPage() {
 
   return (
     <div className="page" dir="rtl">
+      <div
+        title="المساحة المستخدمة من حصة التخزين التي يخصصها المتصفح لهذا الموقع"
+        aria-label={browserStorage ? `استخدام التخزين: ${formatStorageMB(browserStorage.usage)} من ${formatStorageMB(browserStorage.quota)}` : "تعذر قراءة سعة التخزين"}
+        style={{
+          position: "fixed", top: 8, left: 10, zIndex: 1000,
+          padding: "4px 7px", borderRadius: 6,
+          background: "rgba(255,255,255,0.92)", border: "1px solid #d7dee8",
+          color: "#526174", fontSize: 10, lineHeight: 1.2,
+          direction: "ltr", fontVariantNumeric: "tabular-nums",
+          boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+        }}
+      >
+        {browserStorage
+          ? `${formatStorageMB(browserStorage.usage)} / ${formatStorageMB(browserStorage.quota)}`
+          : "Storage: N/A"}
+      </div>
       <header className="hero">
         <p className="eyebrow">Long Beach Resort · Hotel Tools</p>
         <h1>Guest Name Extractor</h1>
