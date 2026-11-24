@@ -309,6 +309,46 @@ function extractPeople(text: string, searchTerm: string, company = "") {
 
   const clean = text.replace(/[\t|]+/g, " ").replace(/\s+/g, " ").trim();
 
+  // W2M booking emails: guest rows appear in the "Passengers" section as
+  // "* Full Name (Age: NN)". A booking may list the lead passenger twice:
+  // once in the Passenger Name fields and again in the full passengers list.
+  // Use the full list so every passenger is returned, including middle names
+  // and repeated surname tokens such as "Bernadette A Byrne A".
+  const isW2mBooking = /^w2m$/i.test(company.trim())
+    || (/\bBooking\s+Code\b/i.test(clean)
+      && /\bPassenger\s+Name\b/i.test(clean)
+      && /\bPassenger\s+Last\s+Name\b/i.test(clean)
+      && /\bWorld\s+2\s+Meet\b/i.test(clean));
+  if (isW2mBooking) {
+    const passengersStart = clean.search(/\bPassengers\s*:/i);
+    const passengersEndMatch = passengersStart >= 0
+      ? clean.slice(passengersStart).match(/\bNumber\s+of\s+Adults\s*\/\s*Childs\s*\/\s*Babies\b/i)
+      : null;
+    const passengersSection = passengersStart >= 0
+      ? clean.slice(passengersStart + "Passengers:".length,
+          passengersEndMatch
+            ? passengersStart + "Passengers:".length + passengersEndMatch.index!
+            : clean.length)
+      : "";
+    const w2mRowPattern = /(?:^|\\s)\\*\\s*([\\p{L}\\p{M}][\\p{L}\\p{M}'’.-]*(?:\\s+[\\p{L}\\p{M}][\\p{L}\\p{M}'’.-]*){1,7})\\s*\\(\\s*Age\\s*:\\s*\\d{1,3}\\s*\\)/giu;
+    const w2mPeople = Array.from(passengersSection.matchAll(w2mRowPattern), (match) => ({
+      name: titleCaseName(match[1].trim()),
+      dob: "",
+    }));
+    if (w2mPeople.length) {
+      const normalizedSearch = normalize(searchTerm);
+      const matchesBooking = !normalizedSearch || w2mPeople.some((person) => {
+        const nameParts = normalize(person.name).split(/\\s+/);
+        const queryParts = normalizedSearch.split(/\\s+/).filter(Boolean);
+        return normalizedSearch === normalize(person.name)
+          || (queryParts.length > 0 && queryParts.every((token) =>
+            nameParts.some((part) => part.includes(token)),
+          ));
+      });
+      return matchesBooking ? w2mPeople : [];
+    }
+  }
+
   // TUI Destimo voucher: the PDF text extractor may emit the room columns
   // before the guest rows, even though the visual table places names under
   // the Name header. Therefore scan the remainder of the page, not the text
