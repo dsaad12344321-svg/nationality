@@ -255,7 +255,35 @@ async function extractText(file: File, extension: string): Promise<{ content: st
     if (!content || !/[\p{L}\p{N}]/u.test(content)) {
       throw new Error("تعذر استخراج نص مقروء من ملف Outlook MSG.");
     }
-    return { content, pages: [content] };
+    // Index readable PDF attachments as additional searchable pages of the MSG.
+    // This makes guest names inside Outlook booking vouchers searchable from
+    // the main folder search, not only from the attachment preview.
+    const msgReader = message as unknown as {
+      getAttachment: (attachment: unknown) => { fileName?: string; content: Uint8Array };
+    };
+    const attachmentPages: string[] = [];
+    for (const attachment of attachmentRows) {
+      const attachmentName = String(attachment.fileName || attachment.name || "").trim();
+      if (!attachmentName.toLowerCase().endsWith(".pdf")) continue;
+      try {
+        const extractedAttachment = msgReader.getAttachment(attachment);
+        const pdfjs = await import("pdfjs-dist");
+        pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+        const pdf = await pdfjs.getDocument({
+          data: new Uint8Array(extractedAttachment.content),
+        }).promise;
+        for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+          const page = await pdf.getPage(pageNumber);
+          const pageContent = await page.getTextContent();
+          attachmentPages.push(pageContent.items
+            .map((item) => ("str" in item ? item.str : ""))
+            .join(" "));
+        }
+      } catch {
+        // Keep the MSG searchable even if one attachment cannot be parsed.
+      }
+    }
+    return { content: [content, ...attachmentPages].join("\\n"), pages: [content, ...attachmentPages] };
   }
   if (extension === "pdf") {
     const pdfjs = await import("pdfjs-dist");
@@ -283,7 +311,26 @@ function titleCaseAnexName(value: string) {
   return titleCaseName(parts.length > 1 ? [...parts.slice(1), parts[0]].join(" ") : value);
 }
 
+function cleanCompanyName(value: string) {
+  return value.trim().toLowerCase().replace(/[\\s_-]+/g, "");
+}
+
 function extractPeople(text: string, searchTerm: string, company = "") {
+  // AllTours hotel reservation forms store each guest in a titled table row:
+  // "Mr SURNAME, GIVEN NAMES AGE". MSG attachments are indexed as extra pages,
+  // so this same parser works for both standalone PDFs and Outlook attachments.
+  if (/\\balltours?\\b/i.test(cleanCompanyName(company))
+    || (/\\bHOTEL\\s+RESERVATION\\s+FORM\\b/i.test(text)
+      && /\\bSURNAME,\\s*NAME\\b/i.test(text)
+      && /\\bVOUCHER\\s+NR\\b/i.test(text))) {
+    const alltourRowPattern = /\\b(?:MR|MRS|MS|MISS|MSTR|MASTER)\\.?\\s+([\\p{L}][\\p{L}’' .-]{1,80}?)\\s+\\d{1,3}(?=\\s|$)/giu;
+    const alltourPeople = Array.from(text.matchAll(alltourRowPattern), (match) => ({
+      name: titleCaseName(match[1].trim()),
+      dob: "",
+    })).filter((person) => person.name.includes(","));
+    if (alltourPeople.length) return alltourPeople;
+  }
+
   // EasyJet bookings arrive as Outlook MSG files. Guest names are in the
   // email body under "Names: Age"; the attached PDF is not the source.
   if (/^easy\s*jet$/i.test(company.trim())) {
