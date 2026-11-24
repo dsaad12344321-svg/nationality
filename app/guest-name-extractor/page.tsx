@@ -235,8 +235,8 @@ async function extractText(file: File, extension: string): Promise<{ content: st
       typeof data.body === "string" ? data.body : "",
       typeof data.headers === "string" ? `\n--- بيانات الرسالة ---\n${data.headers}` : "",
     ].filter((value): value is string => typeof value === "string" && Boolean(value.trim()));
-    const content = fields.join("\n\n").replace(/[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F]/g, " ").trim();
-    if (!content || !/[\\p{L}\\p{N}]/u.test(content)) {
+    const content = fields.join("\n\n").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, " ").trim();
+    if (!content || !/[\p{L}\p{N}]/u.test(content)) {
       throw new Error("تعذر استخراج نص مقروء من ملف Outlook MSG.");
     }
     return { content, pages: [content] };
