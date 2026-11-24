@@ -319,11 +319,22 @@ function extractPeople(text: string, searchTerm: string, company = "") {
     || (/\bHOTEL\s+RESERVATION\s+FORM\b/i.test(text)
       && /\bSURNAME,\s*NAME\b/i.test(text)
       && /\bVOUCHER\s+NR\b/i.test(text))) {
+    // The MSG may contain several independent AllTours vouchers, one per
+    // PDF page. Keep each page as its own booking group and only return the
+    // group whose voucher number or guest name matches the current search.
+    const pageBreak = "\\n\\n--- ALLTOUR PAGE BREAK ---\\n\\n";
+    const bookingPages = text.split(pageBreak).filter((page) => page.trim());
+    const normalizedQuery = normalize(searchTerm);
+    const matchingPages = normalizedQuery
+      ? bookingPages.filter((page) => normalize(page).includes(normalizedQuery))
+      : bookingPages;
     const alltourRowPattern = /\b(?:MR|MRS|MS|MISS|MSTR|MASTER)\.?\s+([\p{L}][\p{L}’', .-]{1,80}?)(?=\s+\d{1,3}\s|\s+Revise\s+Description\b|\s+NOTE:|\s+TOTAL\s+PAX\b|$)/giu;
-    const alltourPeople = Array.from(text.matchAll(alltourRowPattern), (match) => ({
-      name: titleCaseName(match[1].trim()),
-      dob: "",
-    })).filter((person) => person.name.includes(","));
+    const alltourPeople = matchingPages.flatMap((page) =>
+      Array.from(page.matchAll(alltourRowPattern), (match) => ({
+        name: titleCaseName(match[1].trim()),
+        dob: "",
+      })).filter((person) => person.name.includes(",")),
+    );
     if (alltourPeople.length) return alltourPeople;
   }
 
