@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type IndexedFile = {
   id: string; name: string; path: string; company: string; extension: string;
@@ -91,6 +91,7 @@ export default function GuestNameExtractorPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const inputRef = useRef<HTMLInputElement>(null);
   const previewUrl = useMemo(() => selected ? URL.createObjectURL(selected.file) : "", [selected]);
+  useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
 
   const results = useMemo<SearchResult[]>(() => {
     const q = normalize(query);
@@ -238,7 +239,7 @@ export default function GuestNameExtractorPage() {
         </div>}
         <div style={{ border: "1px solid #d7dee8", borderRadius: 10, overflow: "hidden", background: "#f3f5f7" }}>
           {selected.extension === "pdf" ? <iframe title="معاينة ملف PDF" src={previewUrl + "#page=" + currentPage + "&toolbar=1"}
-            style={{ width: "100%", height: " min(75vh, 850px)", minHeight: 560, border: 0 }} /> :
+            style={{ width: "100%", height: "75vh", maxHeight: 850, minHeight: 560, border: 0 }} /> :
             <pre style={{ whiteSpace: "pre-wrap", overflow: "auto", maxHeight: 600, padding: 18, direction: "auto", background: "white" }}>{pageText || "لا يوجد نص قابل للعرض."}</pre>}
         </div>
         <div style={{ marginTop: 18 }}>
