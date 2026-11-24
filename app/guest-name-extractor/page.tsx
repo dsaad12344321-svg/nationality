@@ -187,6 +187,54 @@ function extractPeople(text: string, searchTerm: string) {
   }
 
 
+  // Odeon voucher: numbered tourist rows use SURNAME/GIVEN-NAME,
+  // followed by Adult/Child gender and an optional date of birth.
+  const isOdeonVoucher = /\b(?:voucher\s*no|operator\s+voucher\s+no)\b/i.test(clean)
+    && /\bname\s+surname\b/i.test(clean)
+    && /\bdate\s+of\s+birth\b/i.test(clean)
+    && /\btourists\b/i.test(clean);
+  if (isOdeonVoucher) {
+    const voucherMatch = clean.match(/\bVoucher\s*No\s+(\d{5,12})\b/i);
+    const operatorVoucherMatch = clean.match(/\bOperator\s+Voucher\s+No\s+(\d{5,12})\b/i);
+    const touristsStart = clean.search(/\bTourists\b/i);
+    const afterTourists = clean.slice(touristsStart + 7);
+    const flightOffset = afterTourists.search(/\bFlight\b/i);
+    const touristsSection = flightOffset >= 0 ? afterTourists.slice(0, flightOffset) : afterTourists;
+    const odeonRowPattern = /\b\d{1,2}\s+([A-Z][A-Z'-]{1,35}\/[A-Z][A-Z\s.'’-]{1,45}?)\s+(?:Adult|Child|Infant)\s*-\s*(?:Mr|Mrs|Ms|Miss)\.?\s+(\d{1,2}[./-]\d{1,2}[./-]\d{4}|-)(?=\s|$)/gi;
+    const odeonPeople = Array.from(touristsSection.matchAll(odeonRowPattern), (match) => {
+      const nameParts = match[1].split("/", 2);
+      return {
+        sourceName: match[1].trim(),
+        name: titleCaseName(nameParts[1] + " " + nameParts[0]),
+        dob: match[2] === "-" ? "لم يُعثر عليه" : match[2].replace(/[.-]/g, "/"),
+      };
+    });
+    if (odeonPeople.length) {
+      const normalizedSearch = normalize(searchTerm);
+      const reservationQuery = normalizedSearch.replace(/\s+/g, "");
+      if (!normalizedSearch) return odeonPeople.map(({ name, dob }) => ({ name, dob }));
+      if (/^\d{5,12}$/.test(reservationQuery)) {
+        const ids = [voucherMatch && voucherMatch[1], operatorVoucherMatch && operatorVoucherMatch[1]].filter(Boolean);
+        return ids.includes(reservationQuery)
+          ? odeonPeople.map(({ name, dob }) => ({ name, dob }))
+          : [];
+      }
+      const matchingPeople = odeonPeople.filter((person) => {
+        const source = normalize(person.sourceName.replace("/", " "));
+        const display = normalize(person.name);
+        const tokens = normalizedSearch.split(/\s+/).filter(Boolean);
+        return source.includes(normalizedSearch) || display.includes(normalizedSearch)
+          || (tokens.length > 0 && tokens.every((token) =>
+            source.split(/\s+/).some((part) => part.includes(token))
+            || display.split(/\s+/).some((part) => part.includes(token)),
+          ));
+      });
+      return matchingPeople.length
+        ? odeonPeople.map(({ name, dob }) => ({ name, dob }))
+        : [];
+    }
+  }
+
   // Anex alternative voucher: each guest is printed as a comma-separated line:
   // MRS, SURNAME GIVEN-NAME (Citizenship), DD/MM/YYYY, (Age), Passport: ...
   // Parse complete guest rows so footer dates and other numbers are ignored.
