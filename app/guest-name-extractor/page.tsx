@@ -57,12 +57,12 @@ function titleCaseName(value: string) {
 }
 
 function extractPeople(text: string, searchTerm: string) {
-  const clean = text.replace(/[\\t|]+/g, " ").replace(/\\s+/g, " ").trim();
+  const clean = text.replace(/[\t|]+/g, " ").replace(/\s+/g, " ").trim();
 
   // Anex vouchers place each guest on one row: title, name (citizenship), date of birth, age, passport.
   // Parse each row as a unit so dates cannot become detached from the corresponding guest.
-  if (/clients\\s*names\\s*,?\\s*citizenship/i.test(clean) && /date\\s+of\\s+born/i.test(clean)) {
-    const anexRows = /\\b(?:MRS|MR|MS|MISS|MSTR|CHD|INF|ADT|ADULT|CHILD)\\b\\s+([A-Z][A-Z\\s.'’-]{1,65}?)\\s*\\([^)]+\\)\\s+(\\d{1,2}[./-]\\d{1,2}[./-]\\d{2,4})\\s+\\d{1,3}(?=\\s|$)/gi;
+  if (/clients\s*names\s*,?\s*citizenship/i.test(clean) && /date\s+of\s+born/i.test(clean)) {
+    const anexRows = /\b(?:MRS|MR|MS|MISS|MSTR|CHD|INF|ADT|ADULT|CHILD)\b\s+([A-Z][A-Z\s.'’-]{1,65}?)\s*\([^)]+\)\s+(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})\s+\d{1,3}(?=\s|$)/gi;
     const people = Array.from(clean.matchAll(anexRows), (match) => ({
       name: titleCaseName(match[1].trim()),
       dob: match[2].replace(/[.-]/g, "/"),
@@ -70,18 +70,18 @@ function extractPeople(text: string, searchTerm: string) {
     if (people.length) return people;
   }
 
-  const datePattern = "(?:\\\\d{1,2}[\\\\/-]\\\\d{1,2}[\\\\/-]\\\\d{2,4}|\\\\d{4}[\\\\/-]\\\\d{1,2}[\\\\/-]\\\\d{1,2}|\\\\d{1,2}\\\\s+[A-Za-z]{3,9}\\\\s+\\\\d{4})";
+  const datePattern = "(?:\\d{1,2}[\\/-]\\d{1,2}[\\/-]\\d{2,4}|\\d{4}[\\/-]\\d{1,2}[\\/-]\\d{1,2}|\\d{1,2}\\s+[A-Za-z]{3,9}\\s+\\d{4})";
   const dates: string[] = [];
-  const dateRegex = new RegExp("(?:date\\\\s*of\\\\s*birth|birth\\\\s*date|dob|d\\\\.o\\\\.b\\\\.?|تاريخ\\\\s*الميلاد)\\\\s*[:#-]?\\\\s*(" + datePattern + ")", "gi");
+  const dateRegex = new RegExp("(?:date\\s*of\\s*birth|birth\\s*date|dob|d\\.o\\.b\\.?|تاريخ\\s*الميلاد)\\s*[:#-]?\\s*(" + datePattern + ")", "gi");
   for (const match of clean.matchAll(dateRegex)) dates.push(match[1]);
   const names: string[] = [];
-  const nameRegex = /(?:guest\\s*name|passenger\\s*name|full\\s*name|name\\s*of\\s*guest|guest|passenger|الاسم|اسم\\s*النزيل)\\s*[:#-]?\\\\s*([\\p{L}][\\p{L}\\s'.-]{2,60}?)(?=\\s+(?:date\\s*of\\s*birth|birth\\s*date|dob|d\\.o\\.b\\.?|passport|nationality|room|تاريخ\\s*الميلاد)\\b|[,;|]|$)/giu;
+  const nameRegex = /(?:guest\s*name|passenger\s*name|full\s*name|name\s*of\s*guest|guest|passenger|الاسم|اسم\s*النزيل)\s*[:#-]?\s*([\p{L}][\p{L}\s'.-]{2,60}?)(?=\s+(?:date\s*of\s*birth|birth\s*date|dob|d\.o\.b\.?|passport|nationality|room|تاريخ\s*الميلاد)\b|[,;|]|$)/giu;
   for (const match of clean.matchAll(nameRegex)) {
     const candidate = match[1].trim();
     if (candidate && !names.some((name) => normalize(name) === normalize(candidate))) names.push(candidate);
   }
   if (!names.length && searchTerm.trim()) {
-    const escaped = searchTerm.trim().replace(/[.*+?^{}()|[\\]\\\\]/g, "\\\\$&");
+    const escaped = searchTerm.trim().replace(/[.*+?^\x24{}()|[\]\\]/g, "\\$&");
     const found = clean.match(new RegExp(escaped, "i"));
     if (found) names.push(found[0]);
   }
