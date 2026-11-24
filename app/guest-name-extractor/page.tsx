@@ -682,7 +682,7 @@ export default function GuestNameExtractorPage() {
         const searchable = [item.name, item.path, item.company, page].join(" ");
         const matchesLinkedGuest = matchingArrivalNames.some((name) => arrivalNameMatchesText(name, searchable));
         const matchesDirectQuery = !isArrivalNumberSearch && normalize(searchable).includes(q);
-        if (matchesDirectQuery || matchesLinkedGuest || (isMtsVoucherEmail && index === 0)) {
+        if (matchesDirectQuery || matchesLinkedGuest || (!isArrivalNumberSearch && isMtsVoucherEmail && index === 0)) {
           acc.push(index + 1);
         }
         return acc;
