@@ -305,13 +305,13 @@ function extractPeople(text: string, searchTerm: string, company = "") {
   // Parse only titled rows with a complete DOB so column headings such as
   // "Guest Information" and "Checkin Date" can never be mistaken for guests.
   const isTezVoucher = /^tez$/i.test(company.trim())
-    || (/\\bNEW\\s+RESERVATION\\b/i.test(clean)
-      && /\\bVoucher\\s+No\\b/i.test(clean)
-      && /\\bGuest\\s+Information\\b/i.test(clean)
-      && /\\bCheckin\\s+Date\\b/i.test(clean)
-      && /\\bCheckout\\s+Date\\b/i.test(clean));
+    || (/\bNEW\s+RESERVATION\b/i.test(clean)
+      && /\bVoucher\s+No\b/i.test(clean)
+      && /\bGuest\s+Information\b/i.test(clean)
+      && /\bCheckin\s+Date\b/i.test(clean)
+      && /\bCheckout\s+Date\b/i.test(clean));
   if (isTezVoucher) {
-    const tezRowPattern = /\\b(?:MR|MRS|MS|MISS|MSTR|MASTER)\\.?\\s+([A-Z][A-Z'’.-]{1,40})\\s+([A-Z][A-Z'’.-]*(?:\\s+[A-Z][A-Z'’.-]*){0,2})\\s+(\\d{1,2}[./-]\\d{1,2}[./-]\\d{4})\\b/g;
+    const tezRowPattern = /\b(?:MR|MRS|MS|MISS|MSTR|MASTER)\.?\s+([A-Z][A-Z'’.-]{1,40})\s+([A-Z][A-Z'’.-]*(?:\s+[A-Z][A-Z'’.-]*){0,2})\s+(\d{1,2}[./-]\d{1,2}[./-]\d{4})\b/g;
     const tezPeople = Array.from(clean.matchAll(tezRowPattern), (match) => ({
       name: titleCaseName(match[1] + " " + match[2]),
       dob: match[3].replace(/[/-]/g, "."),
