@@ -636,7 +636,7 @@ export default function GuestNameExtractorPage() {
       .map((item) => normalize(item.name));
     return files.flatMap((item) => {
       const isMtsVoucherEmail = q === "mts" && item.extension === "msg"
-        && /guest\\s+voucher\\s+list/i.test(item.content);
+        && /guest\s+voucher\s+list/i.test(item.content);
       const matchedPages = item.pages.reduce<number[]>((acc, page, index) => {
         const searchable = normalize([item.name, item.path, item.company, page].join(" "));
         if (searchable.includes(q) || matchingArrivalNames.some((name) => name && searchable.includes(name))
