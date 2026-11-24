@@ -311,10 +311,6 @@ function titleCaseAnexName(value: string) {
   return titleCaseName(parts.length > 1 ? [...parts.slice(1), parts[0]].join(" ") : value);
 }
 
-function cleanCompanyName(value: string) {
-  return value.trim().toLowerCase().replace(/[\s_-]+/g, "");
-}
-
 function extractPeople(text: string, searchTerm: string, company = "") {
   // AllTours hotel reservation forms store each guest in a titled table row:
   // "Mr SURNAME, GIVEN NAMES AGE". MSG attachments are indexed as extra pages,
