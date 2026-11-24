@@ -637,9 +637,10 @@ export default function GuestNameExtractorPage() {
     return files.flatMap((item) => {
       // For any search term, also show the MTS Outlook email that contains
       // "Guest Voucher List" whenever the file belongs to an MTS booking folder.
+      const mtsFileIdentity = [item.name, item.path, item.company].join(" ");
       const isMtsVoucherEmail = item.extension === "msg"
-        && /(?:^|[\\/\\s_-])mts(?:[\\/\\s_.-]|$)/i.test([item.name, item.path, item.company].join(" "))
-        && /guest\\s+voucher\\s+list/i.test(item.content);
+        && /(?:^|[\\/\\s_-])mts(?:[\\/\\s_.-]|$)/i.test(mtsFileIdentity)
+        && /guest\\s+voucher\\s+list/i.test([item.name, item.path, item.content].join(" "));
       const matchedPages = item.pages.reduce<number[]>((acc, page, index) => {
         const searchable = normalize([item.name, item.path, item.company, page].join(" "));
         if (searchable.includes(q) || matchingArrivalNames.some((name) => name && searchable.includes(name))
