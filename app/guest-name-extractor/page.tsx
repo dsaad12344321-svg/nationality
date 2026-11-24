@@ -384,6 +384,11 @@ export default function GuestNameExtractorPage() {
 
   async function refreshBrowserStorage() {
     try {
+      // IndexedDB writes/deletes may finish before the browser's quota
+      // estimate reflects the new usage. Wait briefly, then read the
+      // browser-managed estimate so the counter is less likely to show
+      // the previous value immediately after an upload or deletion.
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 300));
       const estimate = await readBrowserStorageEstimate();
       setBrowserStorage(estimate);
     } catch {
