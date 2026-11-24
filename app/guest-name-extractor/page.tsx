@@ -770,15 +770,11 @@ export default function GuestNameExtractorPage() {
     const matchingArrivalNames = linkedArrivalGuests.map((item) => item.name);
 
     return files.flatMap((item) => {
-      const mtsFileIdentity = [item.name, item.path, item.company].join(" ");
-      const isMtsVoucherEmail = item.extension === "msg"
-        && /(?:^|[\\/\s_-])mts(?:[\\/\s_.-]|$)/i.test(mtsFileIdentity)
-        && /guest\s+voucher\s+list/i.test([item.name, item.path, item.content].join(" "));
       const matchedPages = item.pages.reduce<number[]>((acc, page, index) => {
         const searchable = [item.name, item.path, item.company, page].join(" ");
         const matchesLinkedGuest = matchingArrivalNames.some((name) => arrivalNameMatchesText(name, searchable));
         const matchesDirectQuery = !isArrivalNumberSearch && normalize(searchable).includes(q);
-        if (matchesDirectQuery || matchesLinkedGuest || (!isArrivalNumberSearch && isMtsVoucherEmail && index === 0)) {
+        if (matchesDirectQuery || matchesLinkedGuest) {
           acc.push(index + 1);
         }
         return acc;
