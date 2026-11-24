@@ -1050,6 +1050,8 @@ export default function GuestNameExtractorPage() {
               </button>
             </div>
           ))}</div> : <p className="empty-exclusions">لم يتم العثور على اسم وتاريخ ميلاد بصيغة معروفة في نص هذه الصفحة. قد يحتاج المستند إلى مراجعة يدوية أو OCR إذا كان ممسوحاً ضوئياً.</p>}
+          <p className="saved-hint">يتم استخراج البيانات من النص الموجود في الصفحة المحددة فقط. راجع النتيجة قبل اعتمادها.</p>
+        </div>
       </section>}
 
       {selected && <section className="panel" aria-label="معاينة المستند">
