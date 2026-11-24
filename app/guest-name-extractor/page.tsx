@@ -8,6 +8,68 @@ type IndexedFile = {
   size: number; content: string; pages: string[]; file: File;
 };
 type SearchResult = IndexedFile & { matchedPages: number[] };
+type ArrivalRecord = { roomNo: string; name: string; confirmationNo: string; arrivalTime: string };
+
+const ARRIVAL_REPORT_KEY = "nationality-arrival-report-v1";
+
+async function extractArrivalReport(file: File): Promise<ArrivalRecord[]> {
+  const pdfjs = await import("pdfjs-dist");
+  pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+  const pdf = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+  const records: ArrivalRecord[] = [];
+
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+    const page = await pdf.getPage(pageNumber);
+    const content = await page.getTextContent();
+    const rows: { y: number; x: number; text: string }[] = [];
+    for (const item of content.items) {
+      if (!("str" in item) || !item.str.trim() || !("transform" in item)) continue;
+      rows.push({ y: Math.round(item.transform[5] * 2) / 2, x: item.transform[4], text: item.str.trim() });
+    }
+    const grouped: { y: number; items: { x: number; text: string }[] }[] = [];
+    for (const item of rows) {
+      let line = grouped.find((entry) => Math.abs(entry.y - item.y) <= 2);
+      if (!line) { line = { y: item.y, items: [] }; grouped.push(line); }
+      line.items.push({ x: item.x, text: item.text });
+    }
+    const lines = grouped
+      .sort((a, b) => b.y - a.y)
+      .map((line) => line.items.sort((a, b) => a.x - b.x).map((item) => item.text).join(" ").replace(/\\s+/g, " ").trim());
+
+    let current: Partial<ArrivalRecord> | null = null;
+    const finish = () => {
+      if (current?.roomNo && current.name && current.confirmationNo && current.arrivalTime) {
+        records.push(current as ArrivalRecord);
+      }
+    };
+
+    for (const line of lines) {
+      const roomLine = line.match(/^0*(\\d{3,5})\\s+(.+?)\\s+T\\s*-/i);
+      if (roomLine) {
+        finish();
+        current = {
+          roomNo: String(Number(roomLine[1])),
+          name: roomLine[2].trim().replace(/\\s+/g, " "),
+        };
+        continue;
+      }
+      if (!current) continue;
+      if (!current.confirmationNo) {
+        const conf = line.match(/^\\s*(\\d{5,9})(?=\\s|$)/);
+        if (conf) current.confirmationNo = conf[1];
+      }
+      if (!current.arrivalTime) {
+        const time = line.match(/\\b([01]?\\d|2[0-3]):[0-5]\\d\\b/);
+        if (time) current.arrivalTime = time[0].padStart(5, "0");
+      }
+    }
+    finish();
+  }
+
+  const unique = new Map<string, ArrivalRecord>();
+  for (const record of records) unique.set(record.confirmationNo, record);
+  return Array.from(unique.values());
+}
 
 const GUEST_DB_NAME = "nationality-guest-files";
 const GUEST_DB_VERSION = 1;
@@ -381,6 +443,11 @@ export default function GuestNameExtractorPage() {
   const [restoreComplete, setRestoreComplete] = useState(false);
   const [storageMessage, setStorageMessage] = useState("جارٍ استعادة المجلد المحفوظ...");
   const [browserStorage, setBrowserStorage] = useState<{ usage: number; quota: number } | null>(null);
+  const [arrivals, setArrivals] = useState<ArrivalRecord[]>([]);
+  const [arrivalReportName, setArrivalReportName] = useState("");
+  const [arrivalStatus, setArrivalStatus] = useState("");
+  const [arrivalBusy, setArrivalBusy] = useState(false);
+  const arrivalInputRef = useRef<HTMLInputElement>(null);
 
   async function refreshBrowserStorage() {
     try {
@@ -408,6 +475,12 @@ export default function GuestNameExtractorPage() {
         if (!active) return;
         const savedState = savedStateText ? JSON.parse(savedStateText) : {};
         setFiles(savedFiles);
+        const savedArrivals = localStorage.getItem(ARRIVAL_REPORT_KEY);
+        if (savedArrivals) {
+          const parsed = JSON.parse(savedArrivals) as ArrivalRecord[];
+          if (Array.isArray(parsed)) setArrivals(parsed);
+          setArrivalStatus(parsed.length ? `تم استعادة ${parsed.length} حجز من تقرير الوصول المحفوظ.` : "");
+        }
         void refreshBrowserStorage();
         setFolderName(String(savedState.folderName || (savedFiles[0]?.path.split("/")[0] ?? "")));
         const savedQuery = String(savedState.query || "");
@@ -469,10 +542,53 @@ export default function GuestNameExtractorPage() {
     });
   }, [files, query]);
 
+  const arrivalMatches = useMemo(() => {
+    const q = normalize(query).replace(/\\s+/g, "");
+    if (!q || !arrivals.length) return [];
+    return arrivals.filter((item) =>
+      normalize(item.roomNo).replace(/\\s+/g, "").includes(q)
+      || normalize(item.confirmationNo).replace(/\\s+/g, "").includes(q)
+      || normalize(item.name).includes(normalize(query)),
+    );
+  }, [arrivals, query]);
+
   const companies = useMemo(() => new Set(files.map((file) => file.company).filter((name) => name !== "غير محددة")).size, [files]);
   const totalSize = useMemo(() => files.reduce((sum, file) => sum + file.size, 0), [files]);
   const pageText = selected?.pages[currentPage - 1] || "";
   const extractedPeople = useMemo(() => extractPeople(pageText, query), [pageText, query]);
+
+  async function uploadArrivalReport(selectedFiles: FileList | null) {
+    const file = selectedFiles?.[0];
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      setArrivalStatus("من فضلك اختر تقرير PDF بصيغة arr.pdf.");
+      return;
+    }
+    setArrivalBusy(true);
+    setArrivalStatus("جارٍ قراءة تقرير الوصول محلياً...");
+    try {
+      const parsed = await extractArrivalReport(file);
+      if (!parsed.length) {
+        setArrivalStatus("لم يتم العثور على سجلات وصول قابلة للقراءة. تأكد من أن التقرير يحتوي على أعمدة Room No. وName وConf No. وArr. Time.");
+        return;
+      }
+      setArrivals(parsed);
+      setArrivalReportName(file.name);
+      localStorage.setItem(ARRIVAL_REPORT_KEY, JSON.stringify(parsed));
+      setArrivalStatus(`تم استخراج ${parsed.length.toLocaleString("en-US")} حجز من التقرير ${file.name} وحفظ البيانات محلياً.`);
+    } catch {
+      setArrivalStatus("تعذرت قراءة التقرير. تأكد من سلامة ملف PDF ثم حاول مرة أخرى.");
+    } finally {
+      setArrivalBusy(false);
+    }
+  }
+
+  function clearArrivalReport() {
+    localStorage.removeItem(ARRIVAL_REPORT_KEY);
+    setArrivals([]);
+    setArrivalReportName("");
+    setArrivalStatus("تم حذف بيانات تقرير الوصول المحفوظة من المتصفح.");
+  }
 
   async function scanFolder(selectedFiles: FileList | null) {
     if (!selectedFiles?.length) return;
@@ -631,12 +747,20 @@ export default function GuestNameExtractorPage() {
             {busy ? "جارٍ فحص المجلد..." : "اختيار مجلد"}
           </button>
           {files.length > 0 && <button type="button" className="add-button" onClick={() => void removeSavedFolder()} disabled={busy}>حذف المجلد المحفوظ</button>}
+          <button type="button" className="add-button" onClick={() => arrivalInputRef.current?.click()} disabled={arrivalBusy}>
+            {arrivalBusy ? "جارٍ قراءة التقرير..." : arrivals.length ? "استبدال تقرير arr.pdf" : "رفع تقرير arr.pdf"}
+          </button>
+          {arrivals.length > 0 && <button type="button" className="add-button" onClick={clearArrivalReport} disabled={arrivalBusy}>حذف تقرير الوصول</button>}
+          <input ref={arrivalInputRef} type="file" accept=".pdf,application/pdf" hidden
+            onChange={(event) => { void uploadArrivalReport(event.currentTarget.files); event.currentTarget.value = ""; }} />
           <input ref={inputRef} type="file" multiple hidden
             {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
             onChange={(event) => { void scanFolder(event.currentTarget.files); event.currentTarget.value = ""; }} />
         </div>
         {folderName && <div className="filename">المجلد: {folderName}</div>}
         <p className="saved-hint" role="status">{storageMessage}</p>
+        {arrivalReportName && <div className="filename">تقرير الوصول: {arrivalReportName} · {arrivals.length.toLocaleString("en-US")} حجز</div>}
+        {arrivalStatus && <p className="saved-hint" role="status">{arrivalStatus}</p>}
         {busy && <div className="folder-progress" role="status">
           <div className="progress-track"><span style={{ width: progress.total ? (progress.done / progress.total * 100) + "%" : "0%" }} /></div>
           <p className="saved-hint">جارٍ فحص الملفات: {progress.done} من {progress.total}</p>
@@ -647,17 +771,25 @@ export default function GuestNameExtractorPage() {
 
       {files.length > 0 && <>
         <section className="panel">
-          <h2>2. البحث بالاسم أو الشركة أو رقم الحجز</h2>
-          <p className="muted">ستظهر الملفات والصفحات المطابقة. يمكنك البحث باسم النزيل أو اسم الشركة أو رقم الحجز. عند البحث برقم الحجز ستظهر بيانات جميع النزلاء المرتبطين به.</p>
+          <h2>2. البحث بالاسم أو الشركة أو رقم الحجز أو رقم الغرفة أو الرقم التأكيدي</h2>
+          <p className="muted">ستظهر الملفات والصفحات المطابقة. عند رفع تقرير arr.pdf يمكنك أيضاً البحث برقم الغرفة أو الرقم التأكيدي لعرض اسم النزيل وميعاد وصوله.</p>
           <input value={query} onChange={(event) => setQuery(event.target.value)}
-            placeholder="اكتب اسم النزيل أو اسم الشركة أو رقم الحجز..." aria-label="البحث باسم النزيل أو الشركة أو رقم الحجز"
+            placeholder="اكتب الاسم أو الشركة أو رقم الحجز أو رقم الغرفة أو الرقم التأكيدي..." aria-label="البحث بالاسم أو الشركة أو رقم الحجز أو رقم الغرفة أو الرقم التأكيدي"
             style={{ width: "100%", minHeight: 50, border: "1px solid #cbd6e2", borderRadius: 10, padding: "10px 14px", font: "inherit" }} />
           <div className="folder-stats">
             <div><strong>{files.length}</strong><span>ملف تمت قراءته</span></div>
             <div><strong>{companies}</strong><span>شركة/مجلد شركة</span></div>
             <div><strong>{formatSize(totalSize)}</strong><span>إجمالي حجم الملفات</span></div>
           </div>
-          {query.trim() && <p className="saved-hint">عدد الصفحات/المستندات المطابقة: {results.length}</p>}
+          {query.trim() && <p className="saved-hint">عدد الصفحات/المستندات المطابقة: {results.length} · حجوزات تقرير الوصول المطابقة: {arrivalMatches.length}</p>}
+          {query.trim() && arrivalMatches.length > 0 && <div className="folder-results" style={{ marginTop: 14 }}>
+            {arrivalMatches.map((item) => (
+              <article className="folder-result" key={item.confirmationNo}>
+                <strong>{item.name}</strong>
+                <p className="muted">رقم الغرفة: {item.roomNo} · الرقم التأكيدي: {item.confirmationNo} · موعد الوصول: {item.arrivalTime}</p>
+              </article>
+            ))}
+          </div>}
         </section>
         {query.trim() && <section className="panel">
           <h2>3. نتائج البحث</h2>
