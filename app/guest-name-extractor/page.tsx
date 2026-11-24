@@ -716,6 +716,23 @@ export default function GuestNameExtractorPage() {
     window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
   }
 
+  function openOriginalMsgInOutlook() {
+    if (!selected || selected.extension.toLowerCase() !== "msg") return;
+    // Ask the browser/OS to handle the untouched MSG blob in a new tab.
+    // Whether this launches Outlook depends on browser and Windows file associations.
+    const outlookBlob = new Blob([selected.file], { type: "application/vnd.ms-outlook" });
+    const url = URL.createObjectURL(outlookBlob);
+    const opened = window.open(url, "_blank", "noopener,noreferrer");
+    if (!opened) {
+      URL.revokeObjectURL(url);
+      downloadOriginalMsg();
+      setStorageMessage("منع المتصفح فتح نافذة جديدة؛ تم بدء تنزيل ملف MSG الأصلي بدلاً من ذلك.");
+      return;
+    }
+    window.setTimeout(() => URL.revokeObjectURL(url), 5 * 60_000);
+    setStorageMessage("تم إرسال ملف MSG الأصلي إلى المتصفح لمحاولة فتحه. إذا لم يفتح Outlook، استخدم زر تنزيل الملف الأصلي.");
+  }
+
   async function removeSavedFolder() {
     if (!window.confirm("هل تريد حذف نسخة المجلد المحفوظة من هذا المتصفح؟ لن يتم حذف الملفات الأصلية من جهازك.")) return;
     try {
@@ -900,7 +917,10 @@ export default function GuestNameExtractorPage() {
           <div><h2>4. معاينة المستند واستخراج البيانات</h2>
             <p className="muted">{selected.name} · {selected.company}</p></div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {selected.extension === "msg" ? <button type="button" className="add-button" onClick={downloadOriginalMsg}>تنزيل الملف الأصلي لفتحه في Outlook</button> : <button type="button" className="add-button" onClick={printOriginal}>طباعة الملف</button>}
+            {selected.extension === "msg" ? <>
+              <button type="button" className="add-button" onClick={openOriginalMsgInOutlook}>فتح في Outlook</button>
+              <button type="button" className="add-button" onClick={downloadOriginalMsg}>تنزيل الملف الأصلي</button>
+            </> : <button type="button" className="add-button" onClick={printOriginal}>طباعة الملف</button>}
             <button type="button" className="add-button" onClick={() => void copyPageDiagnostics()}>نسخ بيانات الصفحة للتشخيص</button>
             <button type="button" className="add-button" onClick={() => setSelected(null)}>إغلاق المعاينة</button>
           </div>
