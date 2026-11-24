@@ -229,7 +229,7 @@ async function extractText(file: File, extension: string): Promise<{ content: st
     const recipientNames = (data.recipients || [])
       .map((recipient) => recipient.name)
       .filter((name): name is string => typeof name === "string" && Boolean(name.trim()));
-    const attachmentRows = Array.isArray(data.attachments) ? data.attachments as Array<Record<string, unknown>> : [];
+    const attachmentRows = Array.isArray(data.attachments) ? data.attachments as unknown as Array<Record<string, unknown>> : [];
     const attachmentNames = attachmentRows.map((attachment) => String(attachment.fileName || attachment.name || "").trim()).filter(Boolean);
     const fields = [
       data.subject && `الموضوع: ${data.subject}`,
