@@ -341,13 +341,16 @@ function extractPeople(text: string, searchTerm: string, company = "") {
   // Biblio Globus reservation emails list each guest name followed by DOB
   // under the "Names / Date of birth" headings. The reservation reference
   // identifies the whole booking, so searching its number returns all guests.
-  const isBiblioBooking = /^biblio(?:\s*globus)?$/i.test(company.trim())
-    || (/Biblio\s+Globus/i.test(text)
+  const isBiblioBooking = /^(?:biblio|biblo)(?:\s*globus)?$/i.test(company.trim())
+    || (/(?:Biblio|Biblo)\s+Globus/i.test(text)
       && /\bRef\s*#/i.test(text)
       && /\bDate\s+of\s+birth\b/i.test(text)
       && /\bNames\b/i.test(text));
   if (isBiblioBooking) {
-    const reference = text.match(/\bRef\s*#\s*([\w-]+)/i)?.[1] || "";
+    // In this email template "Ref#" is followed by the "Hotel" heading,
+    // then the actual reference on the next row; do not assume it is adjacent.
+    const referenceSection = text.match(/\bRef\s*#([\s\S]{0,160}?)(?=\bCheck\s*\/\s*In\b|\bCheck\s*In\b)/i)?.[1] || "";
+    const reference = referenceSection.match(/\b\d{6,}(?:-\d+)?\b/)?.[0] || "";
     const section = text.match(/\bNames\b[\s\S]*?\bDate\s+of\s+birth\b([\s\S]*?)(?=\bIn\s+respect\s+of\s+our\s+guests\b|\bThanks\s+and\s+Best\s+regards\b|$)/i)?.[1] || "";
     const biblioRowPattern = /([\p{L}][\p{L}'’.-]*(?:\s+[\p{L}][\p{L}'’.-]*){0,5}\s*\/\s*(?:MR|MRS|MS|MISS|CHLD|CHD|INF|MSTR))\s+(\d{1,2}[./-]\d{1,2}[./-]\d{4})\b/giu;
     const biblioPeople = Array.from(section.matchAll(biblioRowPattern), (match) => {
