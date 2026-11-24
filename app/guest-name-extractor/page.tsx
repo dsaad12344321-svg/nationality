@@ -223,8 +223,22 @@ async function extractText(file: File, extension: string): Promise<{ content: st
     const { MsgReader } = await import("@kenjiuno/msgreader-web-ng");
     const message = new MsgReader(buffer);
     const data = message.getFileData();
-    const content = [data.subject, data.senderName, data.senderEmail, data.body, data.headers,
-      ...(data.recipients || []).map((recipient) => recipient.name)].filter(Boolean).join("\n");
+    const recipientNames = (data.recipients || [])
+      .map((recipient) => recipient.name)
+      .filter((name): name is string => typeof name === "string" && Boolean(name.trim()));
+    const fields = [
+      data.subject && `الموضوع: ${data.subject}`,
+      data.senderName && `المرسل: ${data.senderName}`,
+      data.senderEmail && `البريد الإلكتروني: ${data.senderEmail}`,
+      data.clientSubmitTime && `تاريخ الإرسال: ${data.clientSubmitTime}`,
+      recipientNames.length ? `المستلمون: ${recipientNames.join(", ")}` : "",
+      typeof data.body === "string" ? data.body : "",
+      typeof data.headers === "string" ? `\n--- بيانات الرسالة ---\n${data.headers}` : "",
+    ].filter((value): value is string => typeof value === "string" && Boolean(value.trim()));
+    const content = fields.join("\n\n").replace(/[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F]/g, " ").trim();
+    if (!content || !/[\\p{L}\\p{N}]/u.test(content)) {
+      throw new Error("تعذر استخراج نص مقروء من ملف Outlook MSG.");
+    }
     return { content, pages: [content] };
   }
   if (extension === "pdf") {
@@ -505,11 +519,28 @@ export default function GuestNameExtractorPage() {
     void refreshBrowserStorage();
     async function restoreSession() {
       try {
-        const [savedFiles, savedStateText] = await Promise.all([
+        const [storedFiles, savedStateText] = await Promise.all([
           loadGuestFiles(),
           Promise.resolve(localStorage.getItem(GUEST_STATE_KEY)),
         ]);
         if (!active) return;
+
+        // Re-parse saved Outlook MSG files. Older cached records may contain
+        // the raw OLE/binary bytes as text from before MSG parsing was enabled.
+        let migratedMsgFiles = false;
+        const savedFiles = await Promise.all(storedFiles.map(async (item) => {
+          if (item.extension?.toLowerCase() !== "msg") return item;
+          try {
+            const extracted = await extractText(item.file, "msg");
+            migratedMsgFiles = true;
+            return { ...item, content: extracted.content, pages: extracted.pages };
+          } catch {
+            return item;
+          }
+        }));
+        if (migratedMsgFiles) {
+          try { await saveGuestFiles(savedFiles); } catch { /* Keep the readable session data even if migration cannot be persisted. */ }
+        }
         const savedState = savedStateText ? JSON.parse(savedStateText) : {};
         setFiles(savedFiles);
         const savedArrivals = localStorage.getItem(ARRIVAL_REPORT_KEY);
