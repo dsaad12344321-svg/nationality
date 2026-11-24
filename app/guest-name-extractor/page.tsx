@@ -166,7 +166,7 @@ function extractPeople(text: string, searchTerm: string) {
   if (isSunVoucher) {
     const passengerSection = clean.slice(sunSectionIndex)
       .split(/\b(?:Agency\s+Note|Hotel\s+Notes|Agency\s+Name)\s*:/i)[0];
-    const sunRowPattern = /\b(?:MRS|MR|MS|MISS|MSTR|CHD|INF|ADT|ADULT|CHILD)\s+([A-Z][A-Z\s.'’\-]{1,65}?)\s+(-|\d{1,3})\s+(-|\d{1,2}[./-]\d{1,2}[./-]\d{2,4})\b/gi;
+    const sunRowPattern = /\b(?:MRS|MR|MS|MISS|MSTR|CHD|INF|ADT|ADULT|CHILD)\s+([A-Z][A-Z\s.'’\-]{1,65}?)\s+(-|\d{1,3})\s+(-|\d{1,2}[./-]\d{1,2}[./-]\d{2,4})(?=\s|$)/gi;
     const sunPeople = Array.from(passengerSection.matchAll(sunRowPattern), (match) => ({
       name: titleCaseName(match[1].trim()),
       dob: match[3] === "-" ? "لم يُعثر عليه" : match[3].replace(/[.-]/g, "/"),
