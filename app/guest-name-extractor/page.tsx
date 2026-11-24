@@ -283,7 +283,7 @@ async function extractText(file: File, extension: string): Promise<{ content: st
         // Keep the MSG searchable even if one attachment cannot be parsed.
       }
     }
-    return { content: [content, ...attachmentPages].join("\\n"), pages: [content, ...attachmentPages] };
+    return { content: [content, ...attachmentPages].join("\n"), pages: [content, ...attachmentPages] };
   }
   if (extension === "pdf") {
     const pdfjs = await import("pdfjs-dist");
@@ -312,18 +312,18 @@ function titleCaseAnexName(value: string) {
 }
 
 function cleanCompanyName(value: string) {
-  return value.trim().toLowerCase().replace(/[\\s_-]+/g, "");
+  return value.trim().toLowerCase().replace(/[\s_-]+/g, "");
 }
 
 function extractPeople(text: string, searchTerm: string, company = "") {
   // AllTours hotel reservation forms store each guest in a titled table row:
   // "Mr SURNAME, GIVEN NAMES AGE". MSG attachments are indexed as extra pages,
   // so this same parser works for both standalone PDFs and Outlook attachments.
-  if (/\\balltours?\\b/i.test(cleanCompanyName(company))
-    || (/\\bHOTEL\\s+RESERVATION\\s+FORM\\b/i.test(text)
-      && /\\bSURNAME,\\s*NAME\\b/i.test(text)
-      && /\\bVOUCHER\\s+NR\\b/i.test(text))) {
-    const alltourRowPattern = /\\b(?:MR|MRS|MS|MISS|MSTR|MASTER)\\.?\\s+([\\p{L}][\\p{L}’' .-]{1,80}?)\\s+\\d{1,3}(?=\\s|$)/giu;
+  if (/\balltours?\b/i.test(company.trim())
+    || (/\bHOTEL\s+RESERVATION\s+FORM\b/i.test(text)
+      && /\bSURNAME,\s*NAME\b/i.test(text)
+      && /\bVOUCHER\s+NR\b/i.test(text))) {
+    const alltourRowPattern = /\b(?:MR|MRS|MS|MISS|MSTR|MASTER)\.?\s+([\p{L}][\p{L}’' .-]{1,80}?)\s+\d{1,3}(?=\s|$)/giu;
     const alltourPeople = Array.from(text.matchAll(alltourRowPattern), (match) => ({
       name: titleCaseName(match[1].trim()),
       dob: "",
