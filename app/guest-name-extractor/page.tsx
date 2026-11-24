@@ -160,6 +160,55 @@ export default function GuestNameExtractorPage() {
     }
   }
 
+  const [diagnosticStatus, setDiagnosticStatus] = useState("");
+
+  async function copyPageDiagnostics() {
+    if (!selected) return;
+    setDiagnosticStatus("جارٍ تجهيز بيانات الصفحة...");
+    try {
+      let diagnostic: unknown;
+      if (selected.extension === "pdf") {
+        const pdfjs = await import("pdfjs-dist");
+        pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+        const buffer = await selected.file.arrayBuffer();
+        const pdf = await pdfjs.getDocument({ data: new Uint8Array(buffer) }).promise;
+        const page = await pdf.getPage(currentPage);
+        const textContent = await page.getTextContent();
+        const items = textContent.items.flatMap((item) => {
+          if (!("str" in item) || !item.str.trim()) return [];
+          const transform = "transform" in item ? item.transform : undefined;
+          return [{
+            text: item.str,
+            x: transform?.[4] ?? null,
+            y: transform?.[5] ?? null,
+            width: "width" in item ? item.width : null,
+            height: "height" in item ? item.height : null,
+          }];
+        });
+        diagnostic = {
+          fileName: selected.name,
+          company: selected.company,
+          page: currentPage,
+          pageSize: page.getViewport({ scale: 1 }).view,
+          extractedText: pageText,
+          textItemsWithCoordinates: items,
+        };
+      } else {
+        diagnostic = {
+          fileName: selected.name,
+          company: selected.company,
+          page: currentPage,
+          extractedText: pageText,
+          note: "هذا الملف ليس PDF؛ لا تتوفر إحداثيات عناصر الصفحة.",
+        };
+      }
+      await navigator.clipboard.writeText(JSON.stringify(diagnostic, null, 2));
+      setDiagnosticStatus("تم نسخ بيانات الصفحة. الصقها هنا في المحادثة بعد مراجعتها.");
+    } catch (error) {
+      setDiagnosticStatus("تعذر النسخ تلقائياً. تأكد من السماح للمتصفح بالوصول إلى الحافظة، ثم حاول مرة أخرى.");
+    }
+  }
+
   function formatSize(bytes: number) {
     return bytes < 1024 * 1024 ? (bytes / 1024).toFixed(1) + " KB" : (bytes / (1024 * 1024)).toFixed(2) + " MB";
   }
@@ -226,6 +275,7 @@ export default function GuestNameExtractorPage() {
             <p className="muted">{selected.name} · {selected.company}</p></div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button type="button" className="add-button" onClick={printOriginal}>طباعة الملف</button>
+            <button type="button" className="add-button" onClick={() => void copyPageDiagnostics()}>نسخ بيانات الصفحة للتشخيص</button>
             <button type="button" className="add-button" onClick={() => setSelected(null)}>إغلاق المعاينة</button>
           </div>
         </div>
@@ -250,6 +300,8 @@ export default function GuestNameExtractorPage() {
             </div>
           ))}</div> : <p className="empty-exclusions">لم يتم العثور على اسم وتاريخ ميلاد بصيغة معروفة في نص هذه الصفحة. قد يحتاج المستند إلى مراجعة يدوية أو OCR إذا كان ممسوحاً ضوئياً.</p>}
           <p className="saved-hint">يتم استخراج البيانات من النص الموجود في الصفحة المحددة فقط. راجع النتيجة قبل اعتمادها.</p>
+          {diagnosticStatus && <p className="saved-hint" role="status">{diagnosticStatus}</p>}
+          <p className="saved-hint">تنبيه: قد تتضمن البيانات المنسوخة أسماء النزلاء وأرقام جوازات السفر؛ راجعها واحذف أي بيانات لا ترغب في مشاركتها قبل إرسالها.</p>
         </div>
       </section>}
 
