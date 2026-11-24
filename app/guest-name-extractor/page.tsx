@@ -159,14 +159,14 @@ function extractPeople(text: string, searchTerm: string) {
 
   // SUN International / Hotel2Sejour voucher:
   // Passenger rows follow the "Passenger Informations" table header.
-  const sunSectionIndex = clean.search(/passenger\\s+informations/i);
-  const isSunVoucher = /SUN\\s+INTERNATIONAL/i.test(clean)
-    && /hotel\\s+reservation\\s+form\\s*-?\\s*voucher/i.test(clean)
+  const sunSectionIndex = clean.search(/passenger\s+informations/i);
+  const isSunVoucher = /SUN\s+INTERNATIONAL/i.test(clean)
+    && /hotel\s+reservation\s+form\s*-?\s*voucher/i.test(clean)
     && sunSectionIndex >= 0;
   if (isSunVoucher) {
     const passengerSection = clean.slice(sunSectionIndex)
-      .split(/\\b(?:Agency\\s+Note|Hotel\\s+Notes|Agency\\s+Name)\\s*:/i)[0];
-    const sunRowPattern = /\\b(?:MRS|MR|MS|MISS|MSTR|CHD|INF|ADT|ADULT|CHILD)\\s+([A-Z][A-Z\\s.'’\\-]{1,65}?)\\s+(-|\\d{1,3})\\s+(-|\\d{1,2}[./-]\\d{1,2}[./-]\\d{2,4})\\b/gi;
+      .split(/\b(?:Agency\s+Note|Hotel\s+Notes|Agency\s+Name)\s*:/i)[0];
+    const sunRowPattern = /\b(?:MRS|MR|MS|MISS|MSTR|CHD|INF|ADT|ADULT|CHILD)\s+([A-Z][A-Z\s.'’\-]{1,65}?)\s+(-|\d{1,3})\s+(-|\d{1,2}[./-]\d{1,2}[./-]\d{2,4})\b/gi;
     const sunPeople = Array.from(passengerSection.matchAll(sunRowPattern), (match) => ({
       name: titleCaseName(match[1].trim()),
       dob: match[3] === "-" ? "لم يُعثر عليه" : match[3].replace(/[.-]/g, "/"),
@@ -174,10 +174,10 @@ function extractPeople(text: string, searchTerm: string) {
     if (sunPeople.length) {
       const normalizedSearch = normalize(searchTerm);
       const matchesVoucher = !normalizedSearch
-        || /^\\d{7,8}$/.test(normalizedSearch.replace(/\\s+/g, ""))
+        || /^\d{7,8}$/.test(normalizedSearch.replace(/\s+/g, ""))
         || sunPeople.some((person) => normalize(person.name).includes(normalizedSearch)
-          || normalizedSearch.split(/\\s+/).every((token) =>
-            normalize(person.name).split(/\\s+/).some((part) => part.includes(token)),
+          || normalizedSearch.split(/\s+/).every((token) =>
+            normalize(person.name).split(/\s+/).some((part) => part.includes(token)),
           ));
       return matchesVoucher ? sunPeople : [];
     }
