@@ -844,21 +844,55 @@ export default function GuestNameExtractorPage() {
     }
   }
 
-  function printOriginal() {
+  function printVoucher() {
     if (!selected) return;
-    const url = URL.createObjectURL(selected.file);
+    // Outlook MSG bookings: print the PDF voucher attached to the email,
+    // never the email body. Direct PDF bookings: print the selected PDF itself.
+    const voucher = selected.extension === "msg"
+      ? msgPreview?.attachments.find((attachment) =>
+          attachment.type === "application/pdf" || attachment.name.toLowerCase().endsWith(".pdf"))
+      : selected.extension === "pdf"
+        ? { blob: selected.file }
+        : undefined;
+
+    if (!voucher) {
+      window.alert(selected.extension === "msg"
+        ? "لا يوجد ملف PDF مرفق بهذه الرسالة. لا يمكن طباعة الفاوتشر."
+        : "الطباعة متاحة لملفات PDF فقط.");
+      return;
+    }
+
+    const url = URL.createObjectURL(voucher.blob);
     const printWindow = window.open(url, "_blank");
-    if (printWindow) {
-      const timer = window.setInterval(() => {
-        try {
-          if (printWindow.document.readyState === "complete") {
-            window.clearInterval(timer);
-            printWindow.focus();
-            printWindow.print();
-          }
-        } catch { /* Native PDF viewer controls printing when cross-origin access is restricted. */ }
-      }, 700);
-      window.setTimeout(() => window.clearInterval(timer), 10000);
+    if (!printWindow) {
+      URL.revokeObjectURL(url);
+      window.alert("يرجى السماح بالنوافذ المنبثقة حتى تتمكن من طباعة الفاوتشر.");
+      return;
+    }
+    const timer = window.setInterval(() => {
+      try {
+        if (printWindow.document.readyState === "complete") {
+          window.clearInterval(timer);
+          printWindow.focus();
+          printWindow.print();
+        }
+      } catch {
+        // The browser's built-in PDF viewer may block document access.
+        // It still opens the exact voucher PDF for printing from its toolbar.
+        window.clearInterval(timer);
+      }
+    }, 700);
+    window.setTimeout(() => window.clearInterval(timer), 15000);
+    window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }
+
+  async function copyGuestDetails(person: { name: string; dob: string }) {
+    const value = [person.name, person.dob].filter(Boolean).join(" - ");
+    try {
+      await navigator.clipboard.writeText(value);
+      setDiagnosticStatus(`تم نسخ بيانات ${person.name}.`);
+    } catch {
+      setDiagnosticStatus("تعذر النسخ. تأكد من السماح للمتصفح بالوصول إلى الحافظة.");
     }
   }
 
@@ -1013,7 +1047,8 @@ export default function GuestNameExtractorPage() {
             {selected.extension === "msg" ? <>
               <button type="button" className="add-button" onClick={openOriginalMsgInOutlook}>فتح في Outlook</button>
               <button type="button" className="add-button" onClick={downloadOriginalMsg}>تنزيل الملف الأصلي</button>
-            </> : <button type="button" className="add-button" onClick={printOriginal}>طباعة الملف</button>}
+              <button type="button" className="add-button" onClick={printVoucher} disabled={!msgPreview?.attachments.some((attachment) => attachment.type === "application/pdf" || attachment.name.toLowerCase().endsWith(".pdf"))}>طباعة الفاوتشر</button>
+            </> : <button type="button" className="add-button" onClick={printVoucher}>طباعة الفاوتشر</button>}
             <button type="button" className="add-button" onClick={() => void copyPageDiagnostics()}>نسخ بيانات الصفحة للتشخيص</button>
             <button type="button" className="add-button" onClick={() => setSelected(null)}>إغلاق المعاينة</button>
           </div>
@@ -1075,8 +1110,11 @@ export default function GuestNameExtractorPage() {
         <div style={{ marginTop: 18 }}>
           <h3>الأسماء وتواريخ الميلاد في الصفحة الحالية</h3>
           {extractedPeople.length ? <div className="folder-results">{extractedPeople.map((person, index) => (
-            <div className="folder-result" key={index} dir="ltr" style={{ textAlign: "left", fontWeight: 700 }}>
-              {selected.company.toLocaleLowerCase() === "easy jet" ? person.name : selected.company.toLocaleLowerCase() === "pegas" ? `${person.name} ${person.dob}` : `${person.name} - ${person.dob}`}
+            <div className="folder-result" key={index} dir="ltr" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, textAlign: "left", fontWeight: 700 }}>
+              <span>{selected.company.toLocaleLowerCase() === "easy jet" ? person.name : selected.company.toLocaleLowerCase() === "pegas" ? `${person.name} ${person.dob}` : `${person.name} - ${person.dob}`}</span>
+              <button type="button" onClick={() => void copyGuestDetails(person)} title={`نسخ بيانات ${person.name}`} aria-label={`نسخ بيانات ${person.name}`} style={{ flex: "0 0 34px", width: 34, height: 34, display: "inline-flex", alignItems: "center", justifyContent: "center", border: "1px solid #e45b65", borderRadius: 7, background: "#fff", color: "#d93645", cursor: "pointer" }}>
+                <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h3"/></svg>
+              </button>
             </div>
           ))}</div> : <p className="empty-exclusions">لم يتم العثور على اسم وتاريخ ميلاد بصيغة معروفة في نص هذه الصفحة. قد يحتاج المستند إلى مراجعة يدوية أو OCR إذا كان ممسوحاً ضوئياً.</p>}
           <p className="saved-hint">يتم استخراج البيانات من النص الموجود في الصفحة المحددة فقط. راجع النتيجة قبل اعتمادها.</p>
