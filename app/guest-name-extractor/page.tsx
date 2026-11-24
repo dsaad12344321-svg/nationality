@@ -2,225 +2,152 @@
 
 import { useMemo, useRef, useState } from "react";
 
-type Guest = { name: string; dob: string };
-type Reservation = {
-  confirmation: string;
-  room: string;
+type IndexedFile = {
+  id: string;
+  name: string;
+  path: string;
   company: string;
-  originalFile: string;
-  logGuestName: string;
-  activityDate: string;
-  activityTime: string;
-  action: string;
-  guests: Guest[];
+  extension: string;
+  size: number;
+  content: string;
+  file: File;
 };
 
-const norm = (value: string) => value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
-const aliases = {
-  confirmation: ["confirmationno", "confirmationnumber", "confirmation", "confno", "bookingnumber", "operatorvoucherno", "voucherno"],
-  room: ["roomno", "roomnumber", "room", "roomid"],
-  company: ["company", "companyname", "operator", "agency", "touroperator"],
-  originalFile: ["originalfilename", "originalfile", "filename", "sourcefile", "commonfilename", "file"],
-  guestName: ["fullname", "guestname", "name", "touristname", "passengername", "namesurname"],
-  lastName: ["lastname", "surname", "familyname"],
-  firstName: ["firstname", "givenname", "forename"],
-  dob: ["dateofbirth", "dob", "birthdate", "birthday"],
-  logGuestName: ["logguestname", "activityguestname"],
-  activityDate: ["inschardate", "activitydate", "logdate"],
-  activityTime: ["inschartime", "activitytime", "logtime"],
-  action: ["actiontype", "action"],
-};
+const SUPPORTED = new Set(["pdf", "docx", "msg", "txt", "csv", "xml", "html", "htm", "eml", "log"]);
+const normalize = (value: string) =>
+  value.toLocaleLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 
-function keyOf(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+function getCompany(path: string) {
+  const parts = path.split("/").filter(Boolean);
+  if (parts.length >= 3) return parts[1];
+  if (parts.length === 2) return "غير محددة";
+  return "غير محددة";
 }
 
-function textOf(node: Element | null): string {
-  return node?.textContent?.replace(/\s+/g, " ").trim() || "";
-}
+async function extractText(file: File, extension: string): Promise<string> {
+  if (["txt", "csv", "xml", "html", "htm", "eml", "log"].includes(extension)) {
+    return await file.text();
+  }
 
-function directValue(node: Element, keys: string[]): string {
-  for (const child of Array.from(node.children)) {
-    if (keys.includes(keyOf(child.tagName))) {
-      const value = textOf(child);
-      if (value) return value;
+  const buffer = await file.arrayBuffer();
+
+  if (extension === "docx") {
+    const mammoth = await import("mammoth/mammoth.browser");
+    const result = await mammoth.extractRawText({ arrayBuffer: buffer });
+    return result.value || "";
+  }
+
+  if (extension === "msg") {
+    const { MsgReader } = await import("@kenjiuno/msgreader-web-ng");
+    const message = new MsgReader(buffer);
+    const data = message.getFileData();
+    return [data.subject, data.senderName, data.senderEmail, data.body, data.headers,
+      ...(data.recipients || []).map((recipient) => recipient.name)].filter(Boolean).join("\n");
+  }
+
+  if (extension === "pdf") {
+    const pdfjs = await import("pdfjs-dist");
+    pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+    const pdf = await pdfjs.getDocument({ data: new Uint8Array(buffer) }).promise;
+    const pages: string[] = [];
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+      const page = await pdf.getPage(pageNumber);
+      const text = await page.getTextContent();
+      pages.push(text.items.map((item) => ("str" in item ? item.str : "")).join(" "));
     }
+    return pages.join("\n");
   }
-  for (const attr of Array.from(node.attributes)) {
-    if (keys.includes(keyOf(attr.name)) && attr.value.trim()) return attr.value.trim();
-  }
+
   return "";
 }
 
-function parseReservations(xml: string): Reservation[] {
-  const doc = new DOMParser().parseFromString(xml, "application/xml");
-  if (doc.querySelector("parsererror")) throw new Error("ملف XML غير صالح أو لا يمكن قراءته.");
-
-  const all = Array.from(doc.getElementsByTagName("*"));
-  const candidates = all.filter((node) =>
-    directValue(node, aliases.confirmation) && directValue(node, aliases.room)
-  );
-
-  const records: Reservation[] = [];
-  for (const node of candidates) {
-    const confirmation = directValue(node, aliases.confirmation);
-    const room = directValue(node, aliases.room);
-    const company = directValue(node, aliases.company);
-    const originalFile = directValue(node, aliases.originalFile);
-    const logGuestName = directValue(node, aliases.logGuestName);
-    const activityDate = directValue(node, aliases.activityDate);
-    const activityTime = directValue(node, aliases.activityTime);
-    const action = directValue(node, aliases.action);
-    const guests: Guest[] = [];
-
-    const descendants = Array.from(node.getElementsByTagName("*"));
-    let guestNodes = descendants.filter((child) => directValue(child, aliases.guestName));
-    if (!guestNodes.length) {
-      guestNodes = descendants.filter((child) =>
-        aliases.guestName.includes(keyOf(child.tagName)) && child.children.length === 0 && textOf(child)
-      );
-    }
-
-    // Reservation Detail files may store tourists as separate LAST_NAME / FIRST_NAME
-    // fields inside a tourist row rather than one combined NAME field.
-    const touristRows = descendants.filter((child) =>
-      directValue(child, aliases.lastName) || directValue(child, aliases.firstName) ||
-      directValue(child, aliases.guestName)
-    ).filter((child) => {
-      const last = directValue(child, aliases.lastName);
-      const first = directValue(child, aliases.firstName);
-      const combined = directValue(child, aliases.guestName);
-      return Boolean((last || first || combined) && directValue(child, aliases.dob) !== "");
-    });
-
-    const rowsToRead = touristRows.length ? touristRows : guestNodes;
-    for (const guestNode of rowsToRead) {
-      const last = directValue(guestNode, aliases.lastName);
-      const first = directValue(guestNode, aliases.firstName);
-      let name = directValue(guestNode, aliases.guestName);
-      if (last || first) {
-        name = [last, first].filter(Boolean).join(", ");
-      } else if (!name && aliases.guestName.includes(keyOf(guestNode.tagName))) {
-        name = textOf(guestNode);
-      }
-      const dob = directValue(guestNode, aliases.dob);
-      if (name) {
-        // Normalize slash-form names such as VAGNER/ALEKSANDR to LAST, FIRST.
-        if (!last && !first && name.includes("/") && !name.includes(","))
-          name = name.split("/").map((part) => part.trim()).filter(Boolean).join(", ");
-        if (!guests.some((g) => g.name === name && g.dob === dob)) guests.push({ name, dob });
-      }
-    }
-
-    if (!guests.length) {
-      const raw = directValue(node, ["guests", "guestnames", "passengers", "tourists"]);
-      for (const line of raw.split(/[\r\n;]+/).map((s) => s.trim()).filter(Boolean)) {
-        const match = line.match(/^(.*?)(?:\s{2,}|\s+-\s+)(\d{2}[./-]\d{2}[./-]\d{4})$/);
-        guests.push({ name: match?.[1]?.trim() || line, dob: match?.[2] || "" });
-      }
-    }
-
-    const reservation: Reservation = {
-      confirmation, room, company, originalFile, logGuestName,
-      activityDate, activityTime, action, guests,
-    };
-    if (!records.some((r) =>
-      r.confirmation === confirmation && r.room === room &&
-      r.originalFile === originalFile && r.activityDate === activityDate
-    )) records.push(reservation);
-  }
-  return records;
-}
-
 export default function GuestNameExtractorPage() {
-  const [records, setRecords] = useState<Reservation[]>([]);
+  const [files, setFiles] = useState<IndexedFile[]>([]);
   const [query, setQuery] = useState("");
-  const [companyFilter, setCompanyFilter] = useState("");
-  const [timeOrder, setTimeOrder] = useState<"asc" | "desc">("asc");
-  const [fileName, setFileName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [error, setError] = useState("");
-  const [copied, setCopied] = useState("");
-  const fileRef = useRef<HTMLInputElement>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [folderName, setFolderName] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  const companies = useMemo(
-    () => Array.from(new Set(records.map((r) => r.company).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
-    [records]
-  );
+  const results = useMemo(() => {
+    const q = normalize(query);
+    if (!q) return [];
+    return files.filter((item) =>
+      normalize([item.name, item.path, item.company, item.content].join(" ")).includes(q)
+    );
+  }, [files, query]);
 
-  const filtered = useMemo(() => {
-    const q = norm(query);
-    const matches = records.filter((r) => {
-      if (companyFilter && r.company !== companyFilter) return false;
-      if (!q) return true;
-      return norm([
-        r.confirmation, r.room, r.company, r.originalFile, r.logGuestName,
-        r.activityDate, r.activityTime, r.action,
-        ...r.guests.flatMap((g) => [g.name, g.dob]),
-      ].join(" ")).includes(q);
+  const companies = useMemo(() => new Set(files.map((file) => file.company).filter((name) => name !== "غير محددة")).size, [files]);
+  const totalSize = useMemo(() => files.reduce((sum, file) => sum + file.size, 0), [files]);
+
+  async function scanFolder(selected: FileList | null) {
+    if (!selected?.length) return;
+    const allFiles = Array.from(selected);
+    const root = allFiles[0].webkitRelativePath?.split("/")[0] || "المجلد المحدد";
+    const readable = allFiles.filter((file) => {
+      const ext = file.name.split(".").pop()?.toLowerCase() || "";
+      return SUPPORTED.has(ext);
     });
-    const toTimestamp = (r: Reservation) => {
-      const date = r.activityDate.match(/^(\\d{1,2})[-/.](\\d{1,2})[-/.](\\d{2,4})$/);
-      const time = r.activityTime.match(/^(\\d{1,2}):(\\d{2})/);
-      if (!date) return Number.NaN;
-      const year = Number(date[3]) < 100 ? 2000 + Number(date[3]) : Number(date[3]);
-      return new Date(year, Number(date[2]) - 1, Number(date[1]), Number(time?.[1] || 0), Number(time?.[2] || 0)).getTime();
-    };
-    return matches.sort((a, b) => {
-      const left = toTimestamp(a), right = toTimestamp(b);
-      if (!Number.isFinite(left) && !Number.isFinite(right)) return 0;
-      if (!Number.isFinite(left)) return 1;
-      if (!Number.isFinite(right)) return -1;
-      return timeOrder === "asc" ? left - right : right - left;
-    });
-  }, [records, query, companyFilter, timeOrder]);
 
-  async function loadFile(file?: File) {
-    if (!file) return;
+    setBusy(true);
     setError("");
-    setCopied("");
-    try {
-      const parsed = parseReservations(await file.text());
-      if (!parsed.length) throw new Error("لم أجد سجلات حجوزات. تأكد أن الملف يحتوي على CONFIRMATION_NO وROOM_NO.");
-      setRecords(parsed);
-      setFileName(file.name);
-      setQuery("");
-      setCompanyFilter("");
-    } catch (e) {
-      setRecords([]);
-      setFileName("");
-      setError(e instanceof Error ? e.message : "تعذر قراءة ملف XML.");
+    setWarnings([]);
+    setFiles([]);
+    setQuery("");
+    setFolderName(root);
+    setProgress({ done: 0, total: readable.length });
+
+    const indexed: IndexedFile[] = [];
+    const failed: string[] = [];
+
+    for (let index = 0; index < readable.length; index++) {
+      const file = readable[index];
+      const extension = file.name.split(".").pop()?.toLowerCase() || "";
+      const path = file.webkitRelativePath || file.name;
+      try {
+        const content = await extractText(file, extension);
+        indexed.push({
+          id: path + "-" + file.lastModified + "-" + index,
+          name: file.name,
+          path,
+          company: getCompany(path),
+          extension,
+          size: file.size,
+          content,
+          file,
+        });
+      } catch {
+        failed.push(path);
+      }
+      setProgress({ done: index + 1, total: readable.length });
+    }
+
+    setFiles(indexed);
+    setWarnings(failed);
+    setBusy(false);
+    if (!readable.length) {
+      setError("لم أجد ملفات مدعومة داخل المجلد. الملفات المدعومة: PDF وWord DOCX وOutlook MSG وTXT وCSV وXML.");
+    } else if (!indexed.length) {
+      setError("تعذرت قراءة الملفات المحددة. تحقق من سلامة الملفات ثم حاول مرة أخرى.");
     }
   }
 
-  async function copyText(text: string, label: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(label);
-    } catch {
-      setError("تعذر النسخ تلقائياً. تحقق من صلاحية Clipboard في المتصفح.");
-    }
-  }
-
-  function guestText(r: Reservation) {
-    return r.guests.map((g) => [g.name, g.dob].filter(Boolean).join(" — ")).join("\n");
-  }
-
-  function downloadCsv() {
-    const rows = [
-      ["Confirmation No", "Room", "Company", "Guest Names", "Original File", "Activity Date", "Activity Time", "Action"],
-      ...filtered.map((r) => [
-        r.confirmation, r.room, r.company,
-        r.guests.map((g) => [g.name, g.dob].filter(Boolean).join(" — ")).join(" | "),
-        r.originalFile, r.activityDate, r.activityTime, r.action,
-      ]),
-    ];
-    const csv = "\uFEFF" + rows.map((row) => row.map((cell) => '"' + String(cell ?? "").replace(/"/g, '""') + '"').join(",")).join("\r\n");
-    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  function openOriginal(item: IndexedFile) {
+    const url = URL.createObjectURL(item.file);
     const link = document.createElement("a");
     link.href = url;
-    link.download = "Reservation-Detail-filtered.csv";
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.download = item.name;
     link.click();
-    URL.revokeObjectURL(url);
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  }
+
+  function formatSize(bytes: number) {
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+    return (bytes / (1024 * 1024)).toFixed(2) + " MB";
   }
 
   return (
@@ -228,113 +155,95 @@ export default function GuestNameExtractorPage() {
       <header className="hero">
         <p className="eyebrow">Long Beach Resort · Hotel Tools</p>
         <h1>Guest Name Extractor</h1>
-        <p>ارفع Reservation Detail.xml لعرض تقرير الحجوزات، والبحث برقم الحجز أو الغرفة أو اسم النزيل أو الشركة، مع فلترة النتائج ونسخ الأسماء.</p>
+        <p>ابحث عن اسم النزيل أو الشركة داخل جميع ملفات الحجوزات الموجودة في مجلداتك، وافتح المستند الأصلي مباشرة من النتائج.</p>
       </header>
 
       <section className="panel">
         <div className="section-heading">
           <div>
-            <h2>1. تحميل ملف الحجوزات</h2>
-            <p className="muted">اختر Reservation Detail.xml الناتج من أداة البحث. تتم قراءة الملف محلياً داخل المتصفح ولا يتم إرساله إلى الخادم.</p>
+            <h2>1. اختيار مجلد الحجوزات بالكامل</h2>
+            <p className="muted">اختر المجلد الرئيسي. ستتم قراءة المجلدات الداخلية والملفات الموجودة بها تلقائياً، دون رفعها إلى الخادم.</p>
           </div>
-          <button type="button" className="add-button" onClick={() => fileRef.current?.click()}>اختيار ملف XML</button>
-          <input ref={fileRef} type="file" accept=".xml,text/xml,application/xml" hidden onChange={(e) => { loadFile(e.target.files?.[0]); e.currentTarget.value = ""; }} />
+          <button type="button" className="add-button" onClick={() => inputRef.current?.click()} disabled={busy}>
+            {busy ? "جارٍ فحص المجلد..." : "اختيار مجلد"}
+          </button>
+          <input
+            ref={inputRef}
+            type="file"
+            multiple
+            hidden
+            {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
+            onChange={(event) => {
+              void scanFolder(event.currentTarget.files);
+              event.currentTarget.value = "";
+            }}
+          />
         </div>
-        {fileName && <p className="filename">الملف الحالي: {fileName} · عدد الحجوزات: {records.length}</p>}
+
+        {folderName && <div className="filename">المجلد: {folderName}</div>}
+        {busy && (
+          <div className="folder-progress" role="status">
+            <div className="progress-track"><span style={{ width: progress.total ? (progress.done / progress.total * 100) + "%" : "0%" }} /></div>
+            <p className="saved-hint">جارٍ فحص الملفات: {progress.done} من {progress.total}</p>
+          </div>
+        )}
         {error && <div className="notice error">{error}</div>}
+        {warnings.length > 0 && (
+          <div className="notice">تعذرت قراءة {warnings.length} ملف، لكن تم استكمال فحص بقية الملفات. يمكنك مراجعة أسماء الملفات المتعذرة أسفل النتائج.</div>
+        )}
       </section>
 
-      {records.length > 0 && (
+      {files.length > 0 && (
         <>
           <section className="panel">
-            <h2>2. البحث والفلترة</h2>
-            <p className="muted">يمكنك البحث في رقم التأكيد، رقم الغرفة، اسم النزيل، تاريخ الميلاد، الشركة، اسم الملف، وتاريخ أو وقت الحركة.</p>
-            <div style={{ display: "grid", gridTemplateColumns: "minmax(220px, 2fr) minmax(180px, 1fr)", gap: 12 }}>
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Confirmation / Room / Guest / Company..."
-                aria-label="Search reservations"
-                style={{ width: "100%", minHeight: 48, border: "1px solid #cbd6e2", borderRadius: 10, padding: "10px 14px", font: "inherit", direction: "ltr", textAlign: "left" }}
-              />
-              <select value={companyFilter} onChange={(e) => setCompanyFilter(e.target.value)} aria-label="فلترة حسب الشركة" style={{ minHeight: 48, border: "1px solid #cbd6e2", borderRadius: 10, padding: "8px 12px", font: "inherit", background: "white" }}>
-                <option value="">كل الشركات</option>
-                {companies.map((company) => <option key={company} value={company}>{company}</option>)}
-              </select>
-
+            <h2>2. البحث بالاسم أو الشركة</h2>
+            <p className="muted">اكتب اسم النزيل أو جزءاً منه، أو اسم الشركة. البحث يشمل محتوى المستندات وأسماء الملفات ومسارات المجلدات.</p>
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="اكتب اسم النزيل أو اسم الشركة..."
+              aria-label="البحث باسم النزيل أو الشركة"
+              style={{ width: "100%", minHeight: 50, border: "1px solid #cbd6e2", borderRadius: 10, padding: "10px 14px", font: "inherit" }}
+            />
+            <div className="folder-stats">
+              <div><strong>{files.length}</strong><span>ملف تمت قراءته</span></div>
+              <div><strong>{companies}</strong><span>شركة/مجلد شركة</span></div>
+              <div><strong>{formatSize(totalSize)}</strong><span>إجمالي حجم الملفات</span></div>
             </div>
-            <div className="section-heading" style={{ marginTop: 12 }}>
-              <p className="saved-hint">النتائج المعروضة: {filtered.length} من {records.length} حجز</p>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button type="button" className="add-button" onClick={() => { setQuery(""); setCompanyFilter(""); }}>مسح الفلاتر</button>
-                <button type="button" className="add-button" onClick={downloadCsv} disabled={!filtered.length}>تصدير النتائج CSV</button>
-              </div>
-            </div>
+            {query.trim() && <p className="saved-hint">عدد الملفات المطابقة: {results.length}</p>}
           </section>
 
-          <section className="panel">
-            <h2>3. تقرير الحجوزات</h2>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr><th>Confirmation No.</th><th>Room</th><th>Company</th><th>Guests (Last name, First name — DOB)</th><th>
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: 7, whiteSpace: "nowrap" }}>
-                      Activity Date / Time
-                      <span style={{ display: "inline-flex", gap: 3 }}>
-                        <button type="button" title="ترتيب تصاعدي: الأقدم أولاً" aria-label="ترتيب التاريخ والوقت تصاعدياً" aria-pressed={timeOrder === "asc"} onClick={() => setTimeOrder("asc")} style={{ border: "1px solid #cbd6e2", borderRadius: 5, padding: "2px 7px", cursor: "pointer", background: timeOrder === "asc" ? "#dbeafe" : "white", color: "#174b82", fontWeight: 700 }}>↑</button>
-                        <button type="button" title="ترتيب تنازلي: الأحدث أولاً" aria-label="ترتيب التاريخ والوقت تنازلياً" aria-pressed={timeOrder === "desc"} onClick={() => setTimeOrder("desc")} style={{ border: "1px solid #cbd6e2", borderRadius: 5, padding: "2px 7px", cursor: "pointer", background: timeOrder === "desc" ? "#dbeafe" : "white", color: "#174b82", fontWeight: 700 }}>↓</button>
-                      </span>
-                    </span>
-                  </th><th>Original File</th></tr>
-                </thead>
-                <tbody>
-                  {filtered.map((r, index) => (
-                    <tr key={r.confirmation + "-" + r.room + "-" + r.originalFile + "-" + index}>
-                      <td dir="ltr">{r.confirmation}</td>
-                      <td dir="ltr">{r.room}</td>
-                      <td>{r.company || "—"}</td>
-                      <td style={{ minWidth: 220, whiteSpace: "normal" }}>
-                        {r.guests.map((g, i) => <div key={i} style={{ marginBottom: 4 }}><strong>{g.name}{g.dob ? " — " + g.dob : ""}</strong></div>)}
-                        {r.guests.length > 0 && <button type="button" className="add-button" style={{ marginTop: 6 }} onClick={() => copyText(guestText(r), "table-" + index)}>نسخ الأسماء</button>}
-                        {copied === "table-" + index && <div className="notice success">تم النسخ.</div>}
-                      </td>
-                      <td dir="ltr">{[r.activityDate, r.activityTime].filter(Boolean).join(" ") || "—"}</td>
-                      <td dir="ltr" style={{ whiteSpace: "normal", minWidth: 180 }}>{r.originalFile || "—"}</td>
-                    </tr>
+          {query.trim() && (
+            <section className="panel">
+              <h2>3. نتائج البحث</h2>
+              {results.length ? (
+                <div className="folder-results">
+                  {results.map((item) => (
+                    <article className="folder-result" key={item.id}>
+                      <div className="folder-result-top">
+                        <div>
+                          <strong>{item.name}</strong>
+                          <p className="muted">الشركة: {item.company} · النوع: {item.extension.toUpperCase()} · الحجم: {formatSize(item.size)}</p>
+                        </div>
+                        <button type="button" className="add-button" onClick={() => openOriginal(item)}>فتح الملف الأصلي</button>
+                      </div>
+                      <p className="folder-path" dir="ltr">{item.path}</p>
+                    </article>
                   ))}
-                </tbody>
-              </table>
-            </div>
-            {filtered.length === 0 && <p className="muted">لا توجد نتائج مطابقة للفلاتر الحالية.</p>}
-          </section>
-
-          {filtered.map((r, index) => (
-            <section className="panel" key={"details-" + r.confirmation + "-" + r.room + "-" + index}>
-              <div className="section-heading">
-                <div>
-                  <h2>Confirmation No. {r.confirmation}</h2>
-                  <p className="muted">Room: {r.room}{r.company ? " · Company: " + r.company : ""}</p>
-                  {r.action && <p className="muted">Action: {r.action}</p>}
                 </div>
-                <button type="button" className="add-button" onClick={() => copyText(guestText(r), "reservation-" + index)} disabled={!r.guests.length}>نسخ جميع الأسماء</button>
-              </div>
-              <div style={{ display: "grid", gap: 8, marginTop: 14 }}>
-                {r.guests.length ? r.guests.map((g, guestIndex) => (
-                  <div key={guestIndex} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "12px 14px", border: "1px solid #e1e8f0", borderRadius: 10, background: "#f9fbfd" }}>
-                    <div>
-                      <strong>{g.name}{g.dob ? " — " + g.dob : ""}</strong>
-                    </div>
-                    <button type="button" className="add-button" onClick={() => copyText([g.name, g.dob].filter(Boolean).join("  "), "guest-" + index + "-" + guestIndex)}>نسخ</button>
-                  </div>
-                )) : <p className="muted">لم يتم العثور على أسماء نزلاء في هذا السجل.</p>}
-              </div>
-              {r.originalFile && <p className="saved-hint">Original file: <span dir="ltr">{r.originalFile}</span></p>}
-              {copied === "reservation-" + index && <div className="notice success">تم نسخ جميع الأسماء.</div>}
-              {copied.startsWith("guest-" + index + "-") && <div className="notice success">تم نسخ الاسم.</div>}
+              ) : <p className="empty-exclusions">لا توجد ملفات تحتوي على كلمة البحث.</p>}
             </section>
-          ))}
+          )}
         </>
       )}
+
+      {warnings.length > 0 && (
+        <section className="panel">
+          <h2>ملفات تعذرت قراءتها</h2>
+          <ul className="steps">{warnings.map((path) => <li key={path} dir="ltr">{path}</li>)}</ul>
+        </section>
+      )}
+
       <p className="foot"><a href="/" style={{ color: "#1769aa" }}>العودة إلى أدوات الفندق</a></p>
     </div>
   );
