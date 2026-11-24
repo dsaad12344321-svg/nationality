@@ -1475,9 +1475,17 @@ export default function GuestNameExtractorPage() {
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                   {msgPreview.attachments.map((attachment, index) => (
                     <div key={index} style={{ border: "1px solid #d6dee8", borderRadius: 7, padding: 9, minWidth: 190, maxWidth: 280, background: "white" }}>
+                      {attachment.type.startsWith("image/") ? (
+                        <button type="button" onClick={() => { setActiveAttachment(attachment); setAttachmentSearchQuery(""); setAttachmentSearchMatches([]); setAttachmentSearchStatus(""); setActiveAttachmentPage(1); setAttachmentPdfSearchTerm(""); }}
+                          aria-label={`معاينة الصورة ${attachment.name}`}
+                          style={{ display: "block", width: "100%", padding: 0, marginBottom: 9, border: "1px solid #e2e8f0", borderRadius: 6, background: "#f8fafc", cursor: "zoom-in", overflow: "hidden" }}>
+                          <img src={attachment.url} alt={attachment.name} loading="lazy"
+                            style={{ display: "block", width: "100%", height: 150, objectFit: "contain" }} />
+                        </button>
+                      ) : null}
                       <div style={{ fontSize: 12, overflowWrap: "anywhere", marginBottom: 8 }}>📎 {attachment.name}<div style={{ color: "#778399", marginTop: 3 }}>{formatSize(attachment.size)}</div></div>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                        <button type="button" className="add-button" onClick={() => { setActiveAttachment(attachment); setAttachmentSearchQuery(""); setAttachmentSearchMatches([]); setAttachmentSearchStatus(""); setActiveAttachmentPage(1); setAttachmentPdfSearchTerm(""); }}>فتح / عرض</button>
+                        <button type="button" className="add-button" onClick={() => { setActiveAttachment(attachment); setAttachmentSearchQuery(""); setAttachmentSearchMatches([]); setAttachmentSearchStatus(""); setActiveAttachmentPage(1); setAttachmentPdfSearchTerm(""); }}>{attachment.type.startsWith("image/") ? "تكبير الصورة" : "فتح / عرض"}</button>
                         <button type="button" className="add-button" onClick={() => downloadMsgAttachment(attachment)}>تنزيل</button>
                       </div>
                     </div>
