@@ -160,7 +160,7 @@ function extractPeople(text: string, searchTerm: string) {
   // Anex alternative voucher: each guest is printed as a comma-separated line:
   // MRS, SURNAME GIVEN-NAME (Citizenship), DD/MM/YYYY, (Age), Passport: ...
   // Parse complete guest rows so footer dates and other numbers are ignored.
-  const anexAlternativeRows = /\b(?:MRS|MR|MS|MISS|MSTR|CHD|INF|ADT|ADULT|CHILD)\s*,?\s*([A-Z][A-Z\s.'’-]{1,65}?)\s*\([^)]+\)\s*,\s*(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})\s*,\s*\(\d{1,3}\)\s*,\s*Passport\s*:/gi;
+  const anexAlternativeRows = /\b(?:MRS|MR|MS|MISS|MSTR|CHD|INF|ADT|ADULT|CHILD)\s*,?\s*([A-Z][A-Z\s.'’-]{1,65}?)\s*\([^)]+\)\s*,\s*(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})\s*,\s*\(\d{1,3}\)(?:\s*,\s*Passport\s*:)?/gi;
   // In Anex voucher tables, the Res.No column heading appears only once.
   // Each booking starts with: row number + reservation number + status + check-in date.
   // Keep all guest rows between this marker and the next booking marker together.
