@@ -309,6 +309,33 @@ function extractPeople(text: string, searchTerm: string, company = "") {
 
   const clean = text.replace(/[\t|]+/g, " ").replace(/\s+/g, " ").trim();
 
+  // Red Sea Tours Outlook bookings: each booking block contains guest names
+  // written in French style, e.g. "MR BOUGAULT DOMINIQUE 69 ans".
+  // Keep each repeated booking reference as a separate group so a name search
+  // returns all guests belonging to that booking, not guests from other rooms.
+  if (/^red\s*sea(?:\s*tours)?$/i.test(company.trim())
+    || /redseatours-eg\.com/i.test(text)) {
+    const bookingChunks = text.split(/(?:^|\r?\n)\s*\d{5,10}\s*(?=\r?\n)/);
+    const redSeaGroups = bookingChunks.map((chunk) => {
+      const rowPattern = /\b(?:MR|MM|MRS|MS)\.?\s+([\p{L}\p{M}][\p{L}\p{M}'’.-]*(?:\s+[\p{L}\p{M}][\p{L}\p{M}'’.-]*){1,5})\s+\d{1,3}\s+ans\b/giu;
+      return Array.from(chunk.matchAll(rowPattern), (match) => ({
+        name: titleCaseName(match[1].trim()),
+        dob: "",
+      }));
+    }).filter((group) => group.length > 0);
+    if (redSeaGroups.length) {
+      const normalizedSearch = normalize(searchTerm);
+      const matchingGroup = redSeaGroups.find((group) => !normalizedSearch || group.some((person) => {
+        const nameParts = normalize(person.name).split(/\s+/);
+        const queryParts = normalizedSearch.split(/\s+/).filter(Boolean);
+        return queryParts.length > 0 && queryParts.every((token) =>
+          nameParts.some((part) => part.includes(token)),
+        );
+      }));
+      return matchingGroup || [];
+    }
+  }
+
   // W2M booking emails: guest rows appear in the "Passengers" section as
   // "* Full Name (Age: NN)". Use the full passenger list so every guest is
   // returned, including middle names and repeated surname tokens.
