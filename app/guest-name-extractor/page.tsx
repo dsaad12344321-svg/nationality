@@ -1039,6 +1039,19 @@ export default function GuestNameExtractorPage() {
         </section>}
       </>}
 
+      {selected && <section className="panel" aria-label="الأسماء وتواريخ الميلاد في الصفحة الحالية">
+        <div style={{ marginTop: 18 }}>
+          <h3>الأسماء وتواريخ الميلاد في الصفحة الحالية</h3>
+          {extractedPeople.length ? <div className="folder-results">{extractedPeople.map((person, index) => (
+            <div className="folder-result" key={index} dir="ltr" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, textAlign: "left", fontWeight: 700 }}>
+              <span>{selected.company.toLocaleLowerCase() === "easy jet" ? person.name : selected.company.toLocaleLowerCase() === "pegas" ? `${person.name} ${person.dob}` : `${person.name} - ${person.dob}`}</span>
+              <button type="button" onClick={() => void copyGuestDetails(person)} title={`نسخ بيانات ${person.name}`} aria-label={`نسخ بيانات ${person.name}`} style={{ flex: "0 0 34px", width: 34, height: 34, display: "inline-flex", alignItems: "center", justifyContent: "center", border: "1px solid #e45b65", borderRadius: 7, background: "#fff", color: "#d93645", cursor: "pointer" }}>
+                <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h3"/></svg>
+              </button>
+            </div>
+          ))}</div> : <p className="empty-exclusions">لم يتم العثور على اسم وتاريخ ميلاد بصيغة معروفة في نص هذه الصفحة. قد يحتاج المستند إلى مراجعة يدوية أو OCR إذا كان ممسوحاً ضوئياً.</p>}
+      </section>}
+
       {selected && <section className="panel" aria-label="معاينة المستند">
         <div className="section-heading">
           <div><h2>4. معاينة المستند واستخراج البيانات</h2>
@@ -1107,20 +1120,8 @@ export default function GuestNameExtractorPage() {
             style={{ width: "100%", height: "75vh", maxHeight: 850, minHeight: 560, border: 0 }} /> :
             <pre style={{ whiteSpace: "pre-wrap", overflow: "auto", maxHeight: 600, padding: 18, direction: "rtl", background: "white" }}>{pageText || "لا يوجد نص قابل للعرض."}</pre>}
         </div>}
-        <div style={{ marginTop: 18 }}>
-          <h3>الأسماء وتواريخ الميلاد في الصفحة الحالية</h3>
-          {extractedPeople.length ? <div className="folder-results">{extractedPeople.map((person, index) => (
-            <div className="folder-result" key={index} dir="ltr" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, textAlign: "left", fontWeight: 700 }}>
-              <span>{selected.company.toLocaleLowerCase() === "easy jet" ? person.name : selected.company.toLocaleLowerCase() === "pegas" ? `${person.name} ${person.dob}` : `${person.name} - ${person.dob}`}</span>
-              <button type="button" onClick={() => void copyGuestDetails(person)} title={`نسخ بيانات ${person.name}`} aria-label={`نسخ بيانات ${person.name}`} style={{ flex: "0 0 34px", width: 34, height: 34, display: "inline-flex", alignItems: "center", justifyContent: "center", border: "1px solid #e45b65", borderRadius: 7, background: "#fff", color: "#d93645", cursor: "pointer" }}>
-                <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h3"/></svg>
-              </button>
-            </div>
-          ))}</div> : <p className="empty-exclusions">لم يتم العثور على اسم وتاريخ ميلاد بصيغة معروفة في نص هذه الصفحة. قد يحتاج المستند إلى مراجعة يدوية أو OCR إذا كان ممسوحاً ضوئياً.</p>}
-          <p className="saved-hint">يتم استخراج البيانات من النص الموجود في الصفحة المحددة فقط. راجع النتيجة قبل اعتمادها.</p>
           {diagnosticStatus && <p className="saved-hint" role="status">{diagnosticStatus}</p>}
           <p className="saved-hint">تنبيه: قد تتضمن البيانات المنسوخة أسماء النزلاء وأرقام جوازات السفر؛ راجعها واحذف أي بيانات لا ترغب في مشاركتها قبل إرسالها.</p>
-        </div>
       </section>}
 
       {warnings.length > 0 && <section className="panel"><h2>ملفات تعذرت قراءتها</h2>
