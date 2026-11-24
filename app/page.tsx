@@ -107,11 +107,13 @@ export default function Home() {
         })));
       }
     } catch { /* تجاهل الإضافات اليدوية غير الصالحة */ }
-    const savedTool = localStorage.getItem(ACTIVE_TOOL_STORAGE_KEY);
-    const validTools = ["nationality", "towels", "nationality-missing", "missing-profile", "manager-report", "journal", "rc-missing", "guest-name-extractor"];
-    if (savedTool && validTools.includes(savedTool)) {
-      setActiveTool(savedTool as "nationality" | "towels" | "nationality-missing" | "missing-profile" | "manager-report" | "journal" | "rc-missing" | "guest-name-extractor");
-    }
+    try {
+      const savedTool = localStorage.getItem(ACTIVE_TOOL_STORAGE_KEY);
+      const validTools = ["nationality", "towels", "nationality-missing", "missing-profile", "manager-report", "journal", "rc-missing", "guest-name-extractor"];
+      if (savedTool && validTools.includes(savedTool)) {
+        setActiveTool(savedTool as "nationality" | "towels" | "nationality-missing" | "missing-profile" | "manager-report" | "journal" | "rc-missing" | "guest-name-extractor");
+      }
+    } catch { /* تجاهل تعذر استعادة الأداة النشطة */ }
     setReady(true);
   }, []);
 
