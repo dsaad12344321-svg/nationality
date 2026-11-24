@@ -1048,7 +1048,7 @@ export default function GuestNameExtractorPage() {
               <button type="button" className="add-button" onClick={openOriginalMsgInOutlook}>فتح في Outlook</button>
               <button type="button" className="add-button" onClick={downloadOriginalMsg}>تنزيل الملف الأصلي</button>
               <button type="button" className="add-button" onClick={printVoucher} disabled={!msgPreview?.attachments.some((attachment) => attachment.type === "application/pdf" || attachment.name.toLowerCase().endsWith(".pdf"))}>طباعة الفاوتشر</button>
-            </> : <button type="button" className="add-button" onClick={printVoucher}>طباعة الفاوتشر</button>}
+            </> : selected.extension === "pdf" ? <button type="button" className="add-button" onClick={printVoucher}>طباعة الفاوتشر</button> : null}
             <button type="button" className="add-button" onClick={() => void copyPageDiagnostics()}>نسخ بيانات الصفحة للتشخيص</button>
             <button type="button" className="add-button" onClick={() => setSelected(null)}>إغلاق المعاينة</button>
           </div>
