@@ -188,25 +188,29 @@ function extractPeople(text: string, searchTerm: string) {
 
 
   // Odeon voucher: numbered tourist rows use SURNAME/GIVEN-NAME,
-  // followed by Adult/Child gender and an optional date of birth.
-  const isOdeonVoucher = /\b(?:voucher\s*no|operator\s+voucher\s+no)\b/i.test(clean)
-    && /\bname\s+surname\b/i.test(clean)
-    && /\bdate\s+of\s+birth\b/i.test(clean)
+  // followed by Adult/Child/Infant, title, and date of birth.
+  // Keep detection tolerant because PDF text extraction may omit or reorder
+  // some column headings while preserving the actual tourist rows.
+  const hasOdeonMarkers = /\b(?:voucher\s*no|operator\s+voucher\s+no)\b/i.test(clean)
     && /\btourists\b/i.test(clean);
-  if (isOdeonVoucher) {
-    const voucherMatch = clean.match(/\bVoucher\s*No\s+(\d{5,12})\b/i);
-    const operatorVoucherMatch = clean.match(/\bOperator\s+Voucher\s+No\s+(\d{5,12})\b/i);
+  if (hasOdeonMarkers) {
+    const voucherMatch = clean.match(/\bVoucher\s*No\s*[:#-]?\s*(\d{5,12})\b/i);
+    const operatorVoucherMatch = clean.match(/\bOperator\s+Voucher\s*No\s*[:#-]?\s*(\d{5,12})\b/i);
     const touristsStart = clean.search(/\bTourists\b/i);
-    const afterTourists = clean.slice(touristsStart + 7);
+    const afterTourists = clean.slice(touristsStart + "Tourists".length);
     const flightOffset = afterTourists.search(/\bFlight\b/i);
     const touristsSection = flightOffset >= 0 ? afterTourists.slice(0, flightOffset) : afterTourists;
-    const odeonRowPattern = /\b\d{1,2}\s+([A-Z][A-Z'-]{1,35}\/[A-Z][A-Z\s.'’-]{1,45}?)\s+(?:Adult|Child|Infant)\s*-\s*(?:Mr|Mrs|Ms|Miss)\.?\s+(\d{1,2}[./-]\d{1,2}[./-]\d{4}|-)(?=\s|$)/gi;
+
+    // Capture surname and given name separately. Allow optional spaces around
+    // the slash and tolerate punctuation/spacing variations in PDF extraction.
+    const odeonRowPattern = /(?:^|\s)(\d{1,2})\s+([\p{L}][\p{L}'-]{1,35})\s*\/\s*([\p{L}][\p{L}\s.'’'-]{0,45}?)\s+(Adult|Child|Infant)\s*-\s*(?:Mr|Mrs|Ms|Miss)\.?\s+(\d{1,2}[./-]\d{1,2}[./-]\d{4}|-)(?=\s|$)/giu;
     const odeonPeople = Array.from(touristsSection.matchAll(odeonRowPattern), (match) => {
-      const nameParts = match[1].split("/", 2);
+      const surname = match[2].trim();
+      const givenNames = match[3].trim();
       return {
-        sourceName: match[1].trim(),
-        name: titleCaseName(nameParts[1] + " " + nameParts[0]),
-        dob: match[2] === "-" ? "لم يُعثر عليه" : match[2].replace(/[.-]/g, "/"),
+        sourceName: surname + "/" + givenNames,
+        name: titleCaseName(givenNames + " " + surname),
+        dob: match[6] === "-" ? "لم يُعثر عليه" : match[6].replace(/[.-]/g, "/"),
       };
     });
     if (odeonPeople.length) {
