@@ -44,7 +44,7 @@ async function extractArrivalReport(file: File): Promise<ArrivalRecord[]> {
     };
 
     for (const line of lines) {
-      const roomLine = line.match(/^0*(\\d{3,5})\\s+(.+?)\\s+T\\s*-/i);
+      const roomLine = line.match(/^(\\d{3,5})\\s+(.+?)\\s+T\\s*-/i);
       if (roomLine) {
         finish();
         current = {
@@ -530,9 +530,15 @@ export default function GuestNameExtractorPage() {
   const results = useMemo<SearchResult[]>(() => {
     const q = normalize(query);
     if (!q) return [];
+    const matchingArrivalNames = arrivals
+      .filter((item) => normalize(item.roomNo) === q || normalize(item.confirmationNo) === q)
+      .map((item) => normalize(item.name));
     return files.flatMap((item) => {
       const matchedPages = item.pages.reduce<number[]>((acc, page, index) => {
-        if (normalize([item.name, item.path, item.company, page].join(" ")).includes(q)) acc.push(index + 1);
+        const searchable = normalize([item.name, item.path, item.company, page].join(" "));
+        if (searchable.includes(q) || matchingArrivalNames.some((name) => name && searchable.includes(name))) {
+          acc.push(index + 1);
+        }
         return acc;
       }, []);
       if (normalize([item.name, item.path, item.company].join(" ")).includes(q) && !matchedPages.length) {
@@ -540,7 +546,7 @@ export default function GuestNameExtractorPage() {
       }
       return matchedPages.length ? [{ ...item, matchedPages }] : [];
     });
-  }, [files, query]);
+  }, [files, query, arrivals]);
 
   const arrivalMatches = useMemo(() => {
     const q = normalize(query).replace(/\\s+/g, "");
