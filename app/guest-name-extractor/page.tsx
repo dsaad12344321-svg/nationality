@@ -199,8 +199,8 @@ function extractPeople(text: string, searchTerm: string) {
 
     // A 7- or 8-digit query is treated as an Anex reservation number.
     // Return every guest belonging to that exact reservation only.
-    const reservationQuery = normalizedSearch.replace(/\\s+/g, "");
-    if (/^\\d{7,8}$/.test(reservationQuery)) {
+    const reservationQuery = normalizedSearch.replace(/\s+/g, "");
+    if (/^\d{7,8}$/.test(reservationQuery)) {
       const matchingReservation = bookingGroups.find(
         (group) => group.reservationNo === reservationQuery,
       );
