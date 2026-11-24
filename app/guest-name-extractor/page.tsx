@@ -50,10 +50,13 @@ async function loadGuestFiles(): Promise<IndexedFile[]> {
     request.onerror = () => reject(request.error || new Error("تعذر استعادة الملفات."));
   });
   db.close();
-  return files.filter((item) => item.file instanceof Blob).map((item) => ({
-    ...item,
-    file: item.file instanceof File ? item.file : new File([item.file], item.name, { type: item.file.type }),
-  }));
+  return files.filter((item) => item.file instanceof Blob).map((item) => {
+    const storedBlob = item.file as Blob;
+    const restoredFile = storedBlob instanceof File
+      ? storedBlob
+      : new File([storedBlob], item.name, { type: storedBlob.type });
+    return { ...item, file: restoredFile } as IndexedFile;
+  });
 }
 
 async function clearGuestFiles(): Promise<void> {
