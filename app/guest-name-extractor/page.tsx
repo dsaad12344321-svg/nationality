@@ -705,6 +705,7 @@ export default function GuestNameExtractorPage() {
   const [attachmentSearchMatches, setAttachmentSearchMatches] = useState<AttachmentSearchMatch[]>([]);
   const [attachmentSearchStatus, setAttachmentSearchStatus] = useState("");
   const [activeAttachmentPage, setActiveAttachmentPage] = useState(1);
+  const [attachmentPdfSearchTerm, setAttachmentPdfSearchTerm] = useState("");
   useEffect(() => () => { msgPreview?.attachments.forEach((attachment) => URL.revokeObjectURL(attachment.url)); }, [msgPreview]);
   const [currentPage, setCurrentPage] = useState(1);
   const [restoreComplete, setRestoreComplete] = useState(false);
@@ -1041,8 +1042,9 @@ export default function GuestNameExtractorPage() {
       });
       setAttachmentSearchMatches(matches);
       if (matches.length) {
+        setAttachmentPdfSearchTerm(extension === "pdf" || activeAttachment.type === "application/pdf" ? term : "");
         setActiveAttachmentPage(matches[0].page);
-        setAttachmentSearchStatus(`تم العثور على ${matches.length} صفحة مطابقة.`);
+        setAttachmentSearchStatus(`تم العثور على ${matches.length} صفحة مطابقة. تم تمرير عبارة البحث إلى عارض PDF لمحاولة تمييزها، مع تكبير العرض.`);
       } else {
         setAttachmentSearchStatus("لم يتم العثور على الاسم أو رقم الحجز داخل نص المرفق. إذا كان المستند ممسوحاً ضوئياً فقد يحتاج إلى OCR.");
       }
@@ -1427,7 +1429,7 @@ export default function GuestNameExtractorPage() {
                     <div key={index} style={{ border: "1px solid #d6dee8", borderRadius: 7, padding: 9, minWidth: 190, maxWidth: 280, background: "white" }}>
                       <div style={{ fontSize: 12, overflowWrap: "anywhere", marginBottom: 8 }}>📎 {attachment.name}<div style={{ color: "#778399", marginTop: 3 }}>{formatSize(attachment.size)}</div></div>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                        <button type="button" className="add-button" onClick={() => { setActiveAttachment(attachment); setAttachmentSearchQuery(""); setAttachmentSearchMatches([]); setAttachmentSearchStatus(""); setActiveAttachmentPage(1); }}>فتح / عرض</button>
+                        <button type="button" className="add-button" onClick={() => { setActiveAttachment(attachment); setAttachmentSearchQuery(""); setAttachmentSearchMatches([]); setAttachmentSearchStatus(""); setActiveAttachmentPage(1); setAttachmentPdfSearchTerm(""); }}>فتح / عرض</button>
                         <button type="button" className="add-button" onClick={() => downloadMsgAttachment(attachment)}>تنزيل</button>
                       </div>
                     </div>
@@ -1439,7 +1441,7 @@ export default function GuestNameExtractorPage() {
                   <strong>{activeAttachment.name}</strong>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     <button type="button" className="add-button" onClick={() => void copyAttachmentDiagnostics()}>نسخ بيانات المرفق للتشخيص</button>
-                    <button type="button" className="add-button" onClick={() => { setActiveAttachment(null); setAttachmentSearchMatches([]); setAttachmentSearchStatus(""); }}>إغلاق المرفق</button>
+                    <button type="button" className="add-button" onClick={() => { setActiveAttachment(null); setAttachmentSearchMatches([]); setAttachmentSearchStatus(""); setAttachmentPdfSearchTerm(""); }}>إغلاق المرفق</button>
                   </div>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: 8, marginBottom: 12, direction: "rtl" }}>
@@ -1460,7 +1462,7 @@ export default function GuestNameExtractorPage() {
                   ))}
                 </div>}
                 {activeAttachment.type.startsWith("image/") ? <img src={activeAttachment.url} alt={activeAttachment.name} style={{ maxWidth: "100%", maxHeight: 560, objectFit: "contain" }} /> :
-                  activeAttachment.type === "application/pdf" ? <iframe title={activeAttachment.name} src={activeAttachment.url + "#page=" + activeAttachmentPage + "&toolbar=1"} style={{ width: "100%", height: 600, border: 0, background: "white" }} /> :
+                  activeAttachment.type === "application/pdf" ? <iframe title={activeAttachment.name} src={activeAttachment.url + "#page=" + activeAttachmentPage + "&toolbar=1&zoom=150" + (attachmentPdfSearchTerm ? "&search=" + encodeURIComponent(attachmentPdfSearchTerm) : "")} style={{ width: "100%", height: 600, border: 0, background: "white" }} /> :
                   activeAttachment.type.startsWith("text/") ? <iframe title={activeAttachment.name} src={activeAttachment.url} style={{ width: "100%", height: 400, border: 0, background: "white" }} /> :
                   <p>لا تتوفر معاينة داخلية لهذا النوع من الملفات. يمكنك تنزيله وفتحه بالبرنامج المناسب.</p>}
               </div>}
