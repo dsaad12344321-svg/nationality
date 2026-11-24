@@ -841,8 +841,9 @@ export default function GuestNameExtractorPage() {
       const matches = pages.flatMap((pageText, index) => {
         const normalizedPage = normalize(pageText);
         if (!normalizedPage.includes(normalizedTerm)) return [];
-        const position = normalizedPage.indexOf(normalizedTerm);
-        const excerpt = pageText.slice(Math.max(0, position - 90), position + term.length + 120).replace(/\\s+/g, " ").trim();
+        const rawPosition = pageText.toLocaleLowerCase().indexOf(term.toLocaleLowerCase());
+        const excerptStart = rawPosition >= 0 ? Math.max(0, rawPosition - 90) : 0;
+        const excerpt = pageText.slice(excerptStart, rawPosition >= 0 ? rawPosition + term.length + 120 : 240).replace(/\s+/g, " ").trim();
         return [{ page: index + 1, excerpt: excerpt || "تم العثور على تطابق في هذه الصفحة." }];
       });
       setAttachmentSearchMatches(matches);
