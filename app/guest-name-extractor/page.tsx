@@ -742,9 +742,9 @@ export default function GuestNameExtractorPage() {
         });
         const html = typeof data.bodyHtml === "string" ? data.bodyHtml : "";
         const safeHtml = html
-          .replace(/<script\\b[^>]*>[\\s\\S]*?<\\/script\\s*>/gi, "")
-          .replace(/\\s on[a-z]+\\s*=\\s*("[^"]*"|'[^']*'|[^\\s>]+)/gi, "")
-          .replace(/javascript\\s*:/gi, "");
+          .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, "")
+          .replace(/\s on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+          .replace(/javascript\s*:/gi, "");
         const sentValue = data.messageDeliveryTime || data.clientSubmitTime || data.creationTime || "";
         setMsgPreview({
           subject: String(data.subject || item.name),
