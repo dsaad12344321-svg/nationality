@@ -726,11 +726,12 @@ export default function GuestNameExtractorPage() {
             .map((recipient) => String(recipient.name || recipient.email || "").trim())
             .filter(Boolean).join("; ");
           const attachmentRows = Array.isArray(data.attachments) ? data.attachments as Array<Record<string, unknown>> : [];
-          const getAttachment = (reader as unknown as {
+          const msgReader = reader as unknown as {
             getAttachment: (attachment: unknown) => { fileName?: string; content: Uint8Array };
-          }).getAttachment;
+          };
           const attachments: MsgAttachmentPreview[] = attachmentRows.map((row) => {
-            const extracted = getAttachment(row);
+            // Keep the method bound to its MsgReader instance: it accesses this.reader internally.
+            const extracted = msgReader.getAttachment(row);
             const name = String(extracted.fileName || row.fileName || row.name || "attachment");
             const extension = name.split(".").pop()?.toLowerCase() || "";
             const mimeByExtension: Record<string, string> = {
