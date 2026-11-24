@@ -189,6 +189,15 @@ const SUPPORTED = new Set(["pdf", "docx", "msg", "txt", "csv", "xml", "html", "h
 const normalize = (value: string) =>
   value.toLocaleLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 
+// Arrival reports may use "SURNAME, Mr. GIVEN" while vouchers use
+// "MR. SURNAME GIVEN". Match meaningful name parts regardless of order.
+const arrivalNameMatchesText = (arrivalName: string, searchableText: string) => {
+  const ignored = new Set(["mr", "mrs", "ms", "miss", "mstr", "master"]);
+  const tokens = normalize(arrivalName).split(/\s+/).filter((token) => token.length > 1 && !ignored.has(token));
+  const searchable = ` ${normalize(searchableText)} `;
+  return tokens.length >= 2 && tokens.every((token) => searchable.includes(` ${token} `));
+};
+
 const MONTH_FOLDER_PATTERN = /^\\d{1,2}[._ -]?(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)(?:[._ -].*)?$/i;
 
 function getFolderMetadata(path: string): { company: string; day?: string; month?: string } {
@@ -655,25 +664,30 @@ export default function GuestNameExtractorPage() {
   const results = useMemo<SearchResult[]>(() => {
     const q = normalize(query);
     if (!q) return [];
-    const matchingArrivalNames = arrivals
-      .filter((item) => normalize(item.roomNo) === q || normalize(item.confirmationNo) === q)
-      .map((item) => normalize(item.name));
+
+    // Resolve room/confirmation numbers through arr.pdf, then search by guest name.
+    const linkedArrivalGuests = arrivals.filter((item) =>
+      normalize(item.roomNo).replace(/\s+/g, "") === q.replace(/\s+/g, "")
+      || normalize(item.confirmationNo).replace(/\s+/g, "") === q.replace(/\s+/g, "")
+    );
+    const isArrivalNumberSearch = linkedArrivalGuests.length > 0;
+    const matchingArrivalNames = linkedArrivalGuests.map((item) => item.name);
+
     return files.flatMap((item) => {
-      // For any search term, also show the MTS Outlook email that contains
-      // "Guest Voucher List" whenever the file belongs to an MTS booking folder.
       const mtsFileIdentity = [item.name, item.path, item.company].join(" ");
       const isMtsVoucherEmail = item.extension === "msg"
-        && /(?:^|[\\/\\s_-])mts(?:[\\/\\s_.-]|$)/i.test(mtsFileIdentity)
-        && /guest\\s+voucher\\s+list/i.test([item.name, item.path, item.content].join(" "));
+        && /(?:^|[\\/\s_-])mts(?:[\\/\s_.-]|$)/i.test(mtsFileIdentity)
+        && /guest\s+voucher\s+list/i.test([item.name, item.path, item.content].join(" "));
       const matchedPages = item.pages.reduce<number[]>((acc, page, index) => {
-        const searchable = normalize([item.name, item.path, item.company, page].join(" "));
-        if (searchable.includes(q) || matchingArrivalNames.some((name) => name && searchable.includes(name))
-          || (isMtsVoucherEmail && index === 0)) {
+        const searchable = [item.name, item.path, item.company, page, item.content].join(" ");
+        const matchesLinkedGuest = matchingArrivalNames.some((name) => arrivalNameMatchesText(name, searchable));
+        const matchesDirectQuery = !isArrivalNumberSearch && normalize(searchable).includes(q);
+        if (matchesDirectQuery || matchesLinkedGuest || (isMtsVoucherEmail && index === 0)) {
           acc.push(index + 1);
         }
         return acc;
       }, []);
-      if (normalize([item.name, item.path, item.company].join(" ")).includes(q) && !matchedPages.length) {
+      if (!isArrivalNumberSearch && normalize([item.name, item.path, item.company].join(" ")).includes(q) && !matchedPages.length) {
         matchedPages.push(1);
       }
       return matchedPages.length ? [{ ...item, matchedPages }] : [];
