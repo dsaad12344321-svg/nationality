@@ -270,7 +270,19 @@ function titleCaseAnexName(value: string) {
   return titleCaseName(parts.length > 1 ? [...parts.slice(1), parts[0]].join(" ") : value);
 }
 
-function extractPeople(text: string, searchTerm: string) {
+function extractPeople(text: string, searchTerm: string, company = "") {
+  // EasyJet bookings arrive as Outlook MSG files. Guest names are in the
+  // email body under "Names: Age"; the attached PDF is not the source.
+  if (/^easy\\s*jet$/i.test(company.trim())) {
+    const body = text.replace(/[\\t|]+/g, " ").replace(/\\s+/g, " ").trim();
+    const namesSection = body.match(/\\bNames\\s*:\\s*Age\\s+([\\s\\S]*?)(?=\\bRoom\\s+Taken\\s+from\\s+Allocation\\b|\\bFlight\\s+Arrival\\s+Details\\b|\\bVoucher\\s+attached\\b|\\bBooking\\s+date\\b|$)/i)?.[1] || "";
+    const easyJetRows = /\\b(?:Mrs|Mr|Ms|Miss|Master)\\.?\\s+([\\p{L}][\\p{L}'’.-]*(?:\\s+[\\p{L}][\\p{L}'’.-]*){1,4}?)(?=\\s+(?:Mrs|Mr|Ms|Miss|Master)\\.?\\s+|$)/giu;
+    return Array.from(namesSection.matchAll(easyJetRows), (match) => ({
+      name: titleCaseName(match[1]),
+      dob: "",
+    }));
+  }
+
   const clean = text.replace(/[\t|]+/g, " ").replace(/\s+/g, " ").trim();
 
   // SUN International / Hotel2Sejour voucher:
@@ -636,7 +648,7 @@ export default function GuestNameExtractorPage() {
   const companies = useMemo(() => new Set(files.map((file) => file.company).filter((name) => name !== "غير محددة")).size, [files]);
   const totalSize = useMemo(() => files.reduce((sum, file) => sum + file.size, 0), [files]);
   const pageText = selected?.pages[currentPage - 1] || "";
-  const extractedPeople = useMemo(() => extractPeople(pageText, query), [pageText, query]);
+  const extractedPeople = useMemo(() => extractPeople(pageText, query, selected?.company || ""), [pageText, query, selected?.company]);
 
   async function uploadArrivalReport(selectedFiles: FileList | null) {
     const file = selectedFiles?.[0];
@@ -1053,7 +1065,7 @@ export default function GuestNameExtractorPage() {
           <h3>الأسماء وتواريخ الميلاد في الصفحة الحالية</h3>
           {extractedPeople.length ? <div className="folder-results">{extractedPeople.map((person, index) => (
             <div className="folder-result" key={index} dir="ltr" style={{ textAlign: "left", fontWeight: 700 }}>
-              {selected.company.toLocaleLowerCase() === "pegas" ? `${person.name} ${person.dob}` : `${person.name} - ${person.dob}`}
+              {selected.company.toLocaleLowerCase() === "easy jet" ? person.name : selected.company.toLocaleLowerCase() === "pegas" ? `${person.name} ${person.dob}` : `${person.name} - ${person.dob}`}
             </div>
           ))}</div> : <p className="empty-exclusions">لم يتم العثور على اسم وتاريخ ميلاد بصيغة معروفة في نص هذه الصفحة. قد يحتاج المستند إلى مراجعة يدوية أو OCR إذا كان ممسوحاً ضوئياً.</p>}
           <p className="saved-hint">يتم استخراج البيانات من النص الموجود في الصفحة المحددة فقط. راجع النتيجة قبل اعتمادها.</p>
