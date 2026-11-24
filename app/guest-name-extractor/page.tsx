@@ -309,17 +309,18 @@ function extractPeople(text: string, searchTerm: string, company = "") {
 
   const clean = text.replace(/[\t|]+/g, " ").replace(/\s+/g, " ").trim();
 
-  // TUI Destimo voucher: the guest table prints "Surname / Given name(s) (F/M)".
-  // If the search matches one guest, return the complete guest list from that voucher.
+  // TUI Destimo voucher: the PDF text extractor may emit the room columns
+  // before the guest rows, even though the visual table places names under
+  // the Name header. Therefore scan the remainder of the page, not the text
+  // between the Name and Room headers.
   const isTuiVoucher = /\bTUI\s+Ref\s*:/i.test(clean)
     && /\bSuper\s+PNR\s*:/i.test(clean)
     && /\bRoom\s+types\s*\//i.test(clean)
     && /\bName\s+Age\s+Arrival\s+Departure\b/i.test(clean);
   if (isTuiVoucher) {
     const nameHeader = clean.search(/\bName\s+Age\s+Arrival\s+Departure\b/i);
-    const roomHeader = clean.search(/\bRoom\s+types\s*\//i);
-    const guestSection = nameHeader >= 0 && roomHeader > nameHeader
-      ? clean.slice(nameHeader + "Name Age Arrival Departure".length, roomHeader)
+    const guestSection = nameHeader >= 0
+      ? clean.slice(nameHeader + "Name Age Arrival Departure".length)
       : "";
     const tuiRowPattern = /([\p{L}\p{M}][\p{L}\p{M}'’.-]{1,50})\s*\/\s*([\p{L}\p{M}][\p{L}\p{M}'’ .-]{0,60}?)\s*\(([FM])\)/gu;
     const tuiPeople = Array.from(guestSection.matchAll(tuiRowPattern), (match) => ({
