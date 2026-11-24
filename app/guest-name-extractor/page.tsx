@@ -172,6 +172,7 @@ function extractPeople(text: string, searchTerm: string) {
     const end = bookingStarts[index + 1]?.index ?? clean.length;
     const bookingText = clean.slice(start.index, end);
     const people = Array.from(bookingText.matchAll(anexAlternativeRows), (match) => ({
+      sourceName: match[1].trim(),
       name: titleCaseAnexName(match[1]),
       dob: match[2].replace(/[.-]/g, "/"),
     }));
@@ -184,6 +185,7 @@ function extractPeople(text: string, searchTerm: string) {
         reservationNo: group.reservationNo,
       })))
     : Array.from(clean.matchAll(anexAlternativeRows), (match) => ({
+        sourceName: match[1].trim(),
         name: titleCaseAnexName(match[1]),
         dob: match[2].replace(/[.-]/g, "/"),
         reservationNo: "",
@@ -197,15 +199,32 @@ function extractPeople(text: string, searchTerm: string) {
 
     // Find the booking containing the searched guest, then return all guests
     // from that same booking (not guests from adjacent reservations).
+    // Match both the original surname-first spelling and the display spelling
+    // (Anex commonly prints SURNAME GIVEN-NAME, while the UI reverses the order).
+    const matchesGuest = (person: (typeof alternativePeople)[number]) => {
+      const source = normalize(person.sourceName || "");
+      const display = normalize(person.name);
+      const sourceTokens = source.split(/\\s+/).filter(Boolean);
+      const queryTokens = normalizedSearch.split(/\\s+/).filter(Boolean);
+      return source.includes(normalizedSearch)
+        || display.includes(normalizedSearch)
+        || (queryTokens.length > 0 && queryTokens.every((token) =>
+          sourceTokens.some((part) => part.includes(token)) ||
+          display.split(/\\s+/).some((part) => part.includes(token)),
+        ));
+    };
+
     const matchingGroups = bookingGroups.filter((group) =>
-      group.people.some((person) => normalize(person.name).includes(normalizedSearch)),
+      group.people.some(matchesGuest),
     );
     if (matchingGroups.length) {
-      return matchingGroups.flatMap((group) => group.people);
+      return matchingGroups.flatMap((group) =>
+        group.people.map(({ name, dob }) => ({ name, dob })),
+      );
     }
 
     return alternativePeople
-      .filter((person) => normalize(person.name).includes(normalizedSearch))
+      .filter(matchesGuest)
       .map(({ name, dob }) => ({ name, dob }));
   }
 
