@@ -1142,6 +1142,74 @@ export default function GuestNameExtractorPage() {
     }
   }
 
+  async function copyAttachmentDiagnostics() {
+    if (!activeAttachment || !selected) return;
+    setDiagnosticStatus("جارٍ تجهيز بيانات المرفق للتشخيص...");
+    try {
+      const extension = activeAttachment.name.split(".").pop()?.toLowerCase() || "";
+      const diagnostic: Record<string, unknown> = {
+        sourceFileName: selected.name,
+        company: selected.company,
+        attachmentName: activeAttachment.name,
+        attachmentType: activeAttachment.type || "application/octet-stream",
+        attachmentSize: activeAttachment.size,
+      };
+
+      if (extension === "pdf" || activeAttachment.type === "application/pdf") {
+        const pdfjs = await import("pdfjs-dist");
+        pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+        const pdf = await pdfjs.getDocument({
+          data: new Uint8Array(await activeAttachment.blob.arrayBuffer()),
+        }).promise;
+        const pages = [];
+        for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+          const page = await pdf.getPage(pageNumber);
+          const textContent = await page.getTextContent();
+          const items = textContent.items.flatMap((item) => {
+            if (!("str" in item) || !item.str.trim()) return [];
+            const transform = "transform" in item ? item.transform : undefined;
+            return [{
+              text: item.str,
+              x: transform?.[4] ?? null,
+              y: transform?.[5] ?? null,
+              width: "width" in item ? item.width : null,
+              height: "height" in item ? item.height : null,
+            }];
+          });
+          const viewport = page.getViewport({ scale: 1 });
+          pages.push({
+            page: pageNumber,
+            pageSize: { width: viewport.width, height: viewport.height },
+            extractedText: textContent.items.map((item) => ("str" in item ? item.str : "")).join(" "),
+            textItemsWithCoordinates: items,
+          });
+        }
+        diagnostic.pageCount = pdf.numPages;
+        diagnostic.pages = pages;
+      } else if (extension === "docx") {
+        const mammoth = await import("mammoth/mammoth.browser");
+        const result = await mammoth.extractRawText({
+          arrayBuffer: await activeAttachment.blob.arrayBuffer(),
+        });
+        diagnostic.extractedText = result.value || "";
+        diagnostic.pages = [{ page: 1, extractedText: result.value || "" }];
+      } else if (["txt", "csv", "xml", "html", "htm", "eml", "log"].includes(extension)) {
+        const extractedText = await activeAttachment.blob.text();
+        diagnostic.extractedText = extractedText;
+        diagnostic.pages = [{ page: 1, extractedText }];
+      } else {
+        diagnostic.note = "لا تتوفر حالياً قراءة نصية لهذا النوع من المرفقات؛ تم تضمين بيانات الملف الأساسية فقط. قد يحتاج الملف المصور إلى OCR.";
+      }
+
+      await navigator.clipboard.writeText(JSON.stringify(diagnostic, null, 2));
+      setDiagnosticStatus("تم نسخ بيانات المرفق للتشخيص. الصقها هنا في المحادثة بعد مراجعتها.");
+    } catch (error) {
+      setDiagnosticStatus(error instanceof Error
+        ? "تعذر تجهيز بيانات المرفق: " + error.message
+        : "تعذر نسخ بيانات المرفق. تأكد من السماح للمتصفح بالوصول إلى الحافظة.");
+    }
+  }
+
   function formatSize(bytes: number) {
     return bytes < 1024 * 1024 ? (bytes / 1024).toFixed(1) + " KB" : (bytes / (1024 * 1024)).toFixed(2) + " MB";
   }
@@ -1301,7 +1369,10 @@ export default function GuestNameExtractorPage() {
               {activeAttachment && <div style={{ padding: 14, borderBottom: "1px solid #d5dce5", background: "#f4f7fb" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 10 }}>
                   <strong>{activeAttachment.name}</strong>
-                  <button type="button" className="add-button" onClick={() => { setActiveAttachment(null); setAttachmentSearchMatches([]); setAttachmentSearchStatus(""); }}>إغلاق المرفق</button>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button type="button" className="add-button" onClick={() => void copyAttachmentDiagnostics()}>نسخ بيانات المرفق للتشخيص</button>
+                    <button type="button" className="add-button" onClick={() => { setActiveAttachment(null); setAttachmentSearchMatches([]); setAttachmentSearchStatus(""); }}>إغلاق المرفق</button>
+                  </div>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: 8, marginBottom: 12, direction: "rtl" }}>
                   <input value={attachmentSearchQuery} onChange={(event) => setAttachmentSearchQuery(event.target.value)}
