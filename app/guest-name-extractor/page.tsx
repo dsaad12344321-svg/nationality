@@ -276,11 +276,22 @@ function extractPeople(text: string, searchTerm: string, company = "") {
   if (/^easy\s*jet$/i.test(company.trim())) {
     const body = text.replace(/[\t|]+/g, " ").replace(/\s+/g, " ").trim();
     const namesSection = body.match(/\bNames\s*:\s*Age\s+([\s\S]*?)(?=\bRoom\s+Taken\s+from\s+Allocation\b|\bFlight\s+Arrival\s+Details\b|\bVoucher\s+attached\b|\bBooking\s+date\b|$)/i)?.[1] || "";
-    const easyJetRows = /\b(?:Mrs|Mr|Ms|Miss|Master)\.?\s+([\p{L}][\p{L}'’.-]*(?:\s+[\p{L}][\p{L}'’.-]*){1,4}?)(?=\s+(?:Mrs|Mr|Ms|Miss|Master)\.?\s+|$)/giu;
-    return Array.from(namesSection.matchAll(easyJetRows), (match) => ({
-      name: titleCaseName(match[1]),
-      dob: "",
-    }));
+    // Find each title first, then take the text up to the next titled guest.
+    // This avoids losing later guests when Outlook flattens line breaks.
+    const titlePattern = /\b(?:Mrs|Mr|Ms|Miss|Master)\.?\s+/giu;
+    const titleMatches = Array.from(namesSection.matchAll(titlePattern));
+    return titleMatches.map((match, index) => {
+      const start = (match.index ?? 0) + match[0].length;
+      const end = titleMatches[index + 1]?.index ?? namesSection.length;
+      const name = namesSection.slice(start, end)
+        .replace(/\s+/g, " ")
+        .replace(/[^\p{L}\p{M}'’.-]+$/gu, "")
+        .trim();
+      return { name: titleCaseName(name), dob: "" };
+    }).filter((person) =>
+      person.name
+      && /^[\p{L}\p{M}'’.-]+(?:\s+[\p{L}\p{M}'’.-]+){1,4}$/u.test(person.name),
+    );
   }
 
   const clean = text.replace(/[\t|]+/g, " ").replace(/\s+/g, " ").trim();
