@@ -239,6 +239,21 @@ function extractPeople(text: string, searchTerm: string) {
     }
   }
 
+  // Pegas hotel booking voucher: columns Title, Last Name, First Name,
+  // Date of birth. Return every guest row on this page, even when the search
+  // term matched another page of the same booking.
+  const isPegasVoucher = /\blast\s+name\b/i.test(clean)
+    && /\bfirst\s+name\b/i.test(clean)
+    && /\bdate\s+of\s+birth\b/i.test(clean);
+  if (isPegasVoucher) {
+    const pegasRowPattern = /\b(MRS|MR|MS|MISS|MSTR|MISTER|MASTER)\s+([\p{L}][\p{L}'’.-]{1,45})\s+([\p{L}][\p{L}'’.-]{1,45}(?:\s+[\p{L}][\p{L}'’.-]{1,45}){0,3})\s+(\d{1,2}[./-]\d{1,2}[./-]\d{4})\b/giu;
+    const pegasPeople = Array.from(clean.matchAll(pegasRowPattern), (match) => ({
+      name: [match[1], match[2], match[3]].join(" ").toLocaleUpperCase(),
+      dob: match[4].replace(/[/-]/g, "."),
+    }));
+    if (pegasPeople.length) return pegasPeople;
+  }
+
   // Anex alternative voucher: each guest is printed as a comma-separated line:
   // MRS, SURNAME GIVEN-NAME (Citizenship), DD/MM/YYYY, (Age), Passport: ...
   // Parse complete guest rows so footer dates and other numbers are ignored.
