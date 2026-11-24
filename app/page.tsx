@@ -10,6 +10,7 @@ type ManualAddition = { id: number; code: string; count: number };
 const STORAGE_KEY = "nationality-report-exclusions-v1";
 const ARRIVAL_STORAGE_KEY = "nationality-report-arrivals-v1";
 const ADDITION_STORAGE_KEY = "nationality-report-additions-v1";
+const ACTIVE_TOOL_STORAGE_KEY = "nationality-report-active-tool-v1";
 const COUNTRIES = [["ES","إسبانيا"],["DE","ألمانيا"],["GB","بريطانيا"],["US","الولايات المتحدة"],["UA","أوكرانيا"],["RU","روسيا"],["BE","بلجيكا"],["PL","بولندا"],["CN","الصين"],["FR","فرنسا"],["IT","إيطاليا"],["IN","الهند"],["JP","اليابان"],["HR","كرواتيا"],["PK","باكستان"],["IR","إيران"],["IL","إسرائيل"],["SA","السعودية"],["IQ","العراق"],["LY","ليبيا"],["SD","السودان"],["PS","فلسطين"],["JO","الأردن"],["MA","المغرب"],["DZ","الجزائر"],["TN","تونس"],["MR","موريتانيا"],["BH","البحرين"],["EG","مصر"],["AE","الإمارات"],["KW","الكويت"],["QA","قطر"],["OM","عُمان"],["YE","اليمن"],["SY","سوريا"],["LB","لبنان"],["NL","هولندا"],["AT","النمسا"],["CH","سويسرا"],["SE","السويد"],["NO","النرويج"],["DK","الدنمارك"],["FI","فنلندا"],["CZ","التشيك"],["SK","سلوفاكيا"],["HU","المجر"],["RO","رومانيا"],["BG","بلغاريا"],["GR","اليونان"],["TR","تركيا"],["CA","كندا"],["AU","أستراليا"],["BR","البرازيل"],["MX","المكسيك"],["ZA","جنوب أفريقيا"]] as const;
 
 export default function Home() {
@@ -106,6 +107,11 @@ export default function Home() {
         })));
       }
     } catch { /* تجاهل الإضافات اليدوية غير الصالحة */ }
+    const savedTool = localStorage.getItem(ACTIVE_TOOL_STORAGE_KEY);
+    const validTools = ["nationality", "towels", "nationality-missing", "missing-profile", "manager-report", "journal", "rc-missing", "guest-name-extractor"];
+    if (savedTool && validTools.includes(savedTool)) {
+      setActiveTool(savedTool as "nationality" | "towels" | "nationality-missing" | "missing-profile" | "manager-report" | "journal" | "rc-missing" | "guest-name-extractor");
+    }
     setReady(true);
   }, []);
 
@@ -120,6 +126,10 @@ export default function Home() {
   useEffect(() => {
     if (ready) localStorage.setItem(ADDITION_STORAGE_KEY, JSON.stringify(additions));
   }, [additions, ready]);
+
+  useEffect(() => {
+    if (ready) localStorage.setItem(ACTIVE_TOOL_STORAGE_KEY, activeTool);
+  }, [activeTool, ready]);
 
   function addExclusion() {
     setExclusions((items) => [...items, { id: Date.now(), code: "ES", count: 1 }]);
