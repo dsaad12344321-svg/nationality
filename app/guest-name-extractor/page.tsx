@@ -319,7 +319,7 @@ function extractPeople(text: string, searchTerm: string, company = "") {
     || (/\bHOTEL\s+RESERVATION\s+FORM\b/i.test(text)
       && /\bSURNAME,\s*NAME\b/i.test(text)
       && /\bVOUCHER\s+NR\b/i.test(text))) {
-    const alltourRowPattern = /\b(?:MR|MRS|MS|MISS|MSTR|MASTER)\.?\s+([\p{L}][\p{L}’', .-]{1,80}?)\s+\d{1,3}(?=\s|$)/giu;
+    const alltourRowPattern = /\b(?:MR|MRS|MS|MISS|MSTR|MASTER)\.?\s+([\p{L}][\p{L}’', .-]{1,80}?)(?=\s+\d{1,3}\s|\s+Revise\s+Description\b|\s+NOTE:|\s+TOTAL\s+PAX\b|$)/giu;
     const alltourPeople = Array.from(text.matchAll(alltourRowPattern), (match) => ({
       name: titleCaseName(match[1].trim()),
       dob: "",
