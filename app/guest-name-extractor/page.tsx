@@ -273,10 +273,10 @@ function titleCaseAnexName(value: string) {
 function extractPeople(text: string, searchTerm: string, company = "") {
   // EasyJet bookings arrive as Outlook MSG files. Guest names are in the
   // email body under "Names: Age"; the attached PDF is not the source.
-  if (/^easy\\s*jet$/i.test(company.trim())) {
-    const body = text.replace(/[\\t|]+/g, " ").replace(/\\s+/g, " ").trim();
-    const namesSection = body.match(/\\bNames\\s*:\\s*Age\\s+([\\s\\S]*?)(?=\\bRoom\\s+Taken\\s+from\\s+Allocation\\b|\\bFlight\\s+Arrival\\s+Details\\b|\\bVoucher\\s+attached\\b|\\bBooking\\s+date\\b|$)/i)?.[1] || "";
-    const easyJetRows = /\\b(?:Mrs|Mr|Ms|Miss|Master)\\.?\\s+([\\p{L}][\\p{L}'’.-]*(?:\\s+[\\p{L}][\\p{L}'’.-]*){1,4}?)(?=\\s+(?:Mrs|Mr|Ms|Miss|Master)\\.?\\s+|$)/giu;
+  if (/^easy\s*jet$/i.test(company.trim())) {
+    const body = text.replace(/[\t|]+/g, " ").replace(/\s+/g, " ").trim();
+    const namesSection = body.match(/\bNames\s*:\s*Age\s+([\s\S]*?)(?=\bRoom\s+Taken\s+from\s+Allocation\b|\bFlight\s+Arrival\s+Details\b|\bVoucher\s+attached\b|\bBooking\s+date\b|$)/i)?.[1] || "";
+    const easyJetRows = /\b(?:Mrs|Mr|Ms|Miss|Master)\.?\s+([\p{L}][\p{L}'’.-]*(?:\s+[\p{L}][\p{L}'’.-]*){1,4}?)(?=\s+(?:Mrs|Mr|Ms|Miss|Master)\.?\s+|$)/giu;
     return Array.from(namesSection.matchAll(easyJetRows), (match) => ({
       name: titleCaseName(match[1]),
       dob: "",
