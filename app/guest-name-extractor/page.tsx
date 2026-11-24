@@ -1016,7 +1016,12 @@ export default function GuestNameExtractorPage() {
             docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
           };
-          const mime = String(row.attachMimeTag || mimeByExtension[extension] || "application/octet-stream");
+          // Outlook/MSG قد يضع application/octet-stream حتى لو كان الامتداد صورة.
+          // نثق بنوع MIME الصريح إذا كان مفيدًا، وإلا نستنتجه من امتداد الملف.
+          const declaredMime = String(row.attachMimeTag || "").split(";")[0].trim().toLowerCase();
+          const mime = declaredMime && declaredMime !== "application/octet-stream"
+            ? declaredMime
+            : (mimeByExtension[extension] || declaredMime || "application/octet-stream");
           const blob = new Blob([new Uint8Array(extracted.content).buffer as ArrayBuffer], { type: mime });
           return { name, type: mime, blob, url: URL.createObjectURL(blob), size: blob.size };
         });
