@@ -9,6 +9,7 @@ type IndexedFile = {
 };
 type SearchResult = IndexedFile & { matchedPages: number[] };
 type MsgAttachmentPreview = { name: string; type: string; blob: Blob; url: string; size: number };
+type AttachmentSearchMatch = { page: number; excerpt: string };
 type MsgPreviewData = { subject: string; sender: string; senderEmail: string; to: string; cc: string; sent: string; bodyHtml: string; bodyText: string; attachments: MsgAttachmentPreview[] };
 
 type ArrivalRecord = { roomNo: string; name: string; confirmationNo: string; arrivalTime: string };
@@ -522,6 +523,10 @@ export default function GuestNameExtractorPage() {
   const [msgPreview, setMsgPreview] = useState<MsgPreviewData | null>(null);
   const [msgPreviewError, setMsgPreviewError] = useState("");
   const [activeAttachment, setActiveAttachment] = useState<MsgAttachmentPreview | null>(null);
+  const [attachmentSearchQuery, setAttachmentSearchQuery] = useState("");
+  const [attachmentSearchMatches, setAttachmentSearchMatches] = useState<AttachmentSearchMatch[]>([]);
+  const [attachmentSearchStatus, setAttachmentSearchStatus] = useState("");
+  const [activeAttachmentPage, setActiveAttachmentPage] = useState(1);
   useEffect(() => () => { msgPreview?.attachments.forEach((attachment) => URL.revokeObjectURL(attachment.url)); }, [msgPreview]);
   const [currentPage, setCurrentPage] = useState(1);
   const [restoreComplete, setRestoreComplete] = useState(false);
@@ -794,6 +799,62 @@ export default function GuestNameExtractorPage() {
         setMsgPreviewError(error instanceof Error ? error.message : "تعذرت قراءة مرفقات رسالة Outlook.");
       }
     })();
+  }
+
+  async function searchInsideAttachment() {
+    if (!activeAttachment) return;
+    const term = attachmentSearchQuery.trim();
+    if (!term) {
+      setAttachmentSearchStatus("اكتب الاسم أو رقم الحجز أولاً.");
+      setAttachmentSearchMatches([]);
+      return;
+    }
+    setAttachmentSearchStatus("جارٍ البحث داخل المرفق...");
+    setAttachmentSearchMatches([]);
+    try {
+      const extension = activeAttachment.name.split(".").pop()?.toLowerCase() || "";
+      let pages: string[] = [];
+      if (extension === "pdf" || activeAttachment.type === "application/pdf") {
+        const pdfjs = await import("pdfjs-dist");
+        pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+        const pdf = await pdfjs.getDocument({ data: new Uint8Array(await activeAttachment.blob.arrayBuffer()) }).promise;
+        for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+          const page = await pdf.getPage(pageNumber);
+          const content = await page.getTextContent();
+          pages.push(content.items.map((item) => ("str" in item ? item.str : "")).join(" "));
+        }
+      } else if (extension === "docx") {
+        const mammoth = await import("mammoth/mammoth.browser");
+        const result = await mammoth.extractRawText({ arrayBuffer: await activeAttachment.blob.arrayBuffer() });
+        pages = [result.value || ""];
+      } else if (["txt", "csv", "xml", "html", "htm", "eml", "log"].includes(extension)) {
+        pages = [(await activeAttachment.blob.text())];
+      } else if (extension === "msg") {
+        const attachmentFile = new File([activeAttachment.blob], activeAttachment.name, { type: activeAttachment.type });
+        const extracted = await extractText(attachmentFile, "msg");
+        pages = extracted.pages;
+      } else {
+        setAttachmentSearchStatus("البحث النصي غير متاح لهذا النوع من المرفقات. إذا كان الملف صورة أو PDF ممسوحاً ضوئياً، فهو يحتاج إلى OCR.");
+        return;
+      }
+      const normalizedTerm = normalize(term);
+      const matches = pages.flatMap((pageText, index) => {
+        const normalizedPage = normalize(pageText);
+        if (!normalizedPage.includes(normalizedTerm)) return [];
+        const position = normalizedPage.indexOf(normalizedTerm);
+        const excerpt = pageText.slice(Math.max(0, position - 90), position + term.length + 120).replace(/\\s+/g, " ").trim();
+        return [{ page: index + 1, excerpt: excerpt || "تم العثور على تطابق في هذه الصفحة." }];
+      });
+      setAttachmentSearchMatches(matches);
+      if (matches.length) {
+        setActiveAttachmentPage(matches[0].page);
+        setAttachmentSearchStatus(`تم العثور على ${matches.length} صفحة مطابقة.`);
+      } else {
+        setAttachmentSearchStatus("لم يتم العثور على الاسم أو رقم الحجز داخل نص المرفق. إذا كان المستند ممسوحاً ضوئياً فقد يحتاج إلى OCR.");
+      }
+    } catch (error) {
+      setAttachmentSearchStatus(error instanceof Error ? "تعذر البحث داخل المرفق: " + error.message : "تعذر قراءة المرفق للبحث داخله.");
+    }
   }
 
   function downloadMsgAttachment(attachment: MsgAttachmentPreview) {
@@ -1104,7 +1165,7 @@ export default function GuestNameExtractorPage() {
                     <div key={index} style={{ border: "1px solid #d6dee8", borderRadius: 7, padding: 9, minWidth: 190, maxWidth: 280, background: "white" }}>
                       <div style={{ fontSize: 12, overflowWrap: "anywhere", marginBottom: 8 }}>📎 {attachment.name}<div style={{ color: "#778399", marginTop: 3 }}>{formatSize(attachment.size)}</div></div>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                        <button type="button" className="add-button" onClick={() => setActiveAttachment(attachment)}>فتح / عرض</button>
+                        <button type="button" className="add-button" onClick={() => { setActiveAttachment(attachment); setAttachmentSearchQuery(""); setAttachmentSearchMatches([]); setAttachmentSearchStatus(""); setActiveAttachmentPage(1); }}>فتح / عرض</button>
                         <button type="button" className="add-button" onClick={() => downloadMsgAttachment(attachment)}>تنزيل</button>
                       </div>
                     </div>
@@ -1114,10 +1175,27 @@ export default function GuestNameExtractorPage() {
               {activeAttachment && <div style={{ padding: 14, borderBottom: "1px solid #d5dce5", background: "#f4f7fb" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 10 }}>
                   <strong>{activeAttachment.name}</strong>
-                  <button type="button" className="add-button" onClick={() => setActiveAttachment(null)}>إغلاق المرفق</button>
+                  <button type="button" className="add-button" onClick={() => { setActiveAttachment(null); setAttachmentSearchMatches([]); setAttachmentSearchStatus(""); }}>إغلاق المرفق</button>
                 </div>
+                <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: 8, marginBottom: 12, direction: "rtl" }}>
+                  <input value={attachmentSearchQuery} onChange={(event) => setAttachmentSearchQuery(event.target.value)}
+                    onKeyDown={(event) => { if (event.key === "Enter") void searchInsideAttachment(); }}
+                    placeholder="ابحث داخل المرفق بالاسم أو رقم الحجز..."
+                    aria-label="البحث داخل المرفق بالاسم أو رقم الحجز"
+                    style={{ width: "100%", minHeight: 42, border: "1px solid #cbd6e2", borderRadius: 8, padding: "8px 12px", font: "inherit" }} />
+                  <button type="button" className="add-button" onClick={() => void searchInsideAttachment()}>بحث داخل المرفق</button>
+                </div>
+                {attachmentSearchStatus && <p role="status" style={{ margin: "0 0 10px", color: "#526174", direction: "rtl" }}>{attachmentSearchStatus}</p>}
+                {attachmentSearchMatches.length > 0 && <div style={{ display: "grid", gap: 7, marginBottom: 12, direction: "rtl" }}>
+                  {attachmentSearchMatches.map((match) => (
+                    <button key={match.page} type="button" className="add-button" onClick={() => setActiveAttachmentPage(match.page)}
+                      style={{ textAlign: "right", whiteSpace: "normal" }}>
+                      صفحة {match.page}: {match.excerpt}
+                    </button>
+                  ))}
+                </div>}
                 {activeAttachment.type.startsWith("image/") ? <img src={activeAttachment.url} alt={activeAttachment.name} style={{ maxWidth: "100%", maxHeight: 560, objectFit: "contain" }} /> :
-                  activeAttachment.type === "application/pdf" ? <iframe title={activeAttachment.name} src={activeAttachment.url + "#toolbar=1"} style={{ width: "100%", height: 600, border: 0, background: "white" }} /> :
+                  activeAttachment.type === "application/pdf" ? <iframe title={activeAttachment.name} src={activeAttachment.url + "#page=" + activeAttachmentPage + "&toolbar=1"} style={{ width: "100%", height: 600, border: 0, background: "white" }} /> :
                   activeAttachment.type.startsWith("text/") ? <iframe title={activeAttachment.name} src={activeAttachment.url} style={{ width: "100%", height: 400, border: 0, background: "white" }} /> :
                   <p>لا تتوفر معاينة داخلية لهذا النوع من الملفات. يمكنك تنزيله وفتحه بالبرنامج المناسب.</p>}
               </div>}
