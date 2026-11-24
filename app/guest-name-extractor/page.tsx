@@ -142,38 +142,51 @@ function extractPeople(text: string, searchTerm: string) {
   // MRS, SURNAME GIVEN-NAME (Citizenship), DD/MM/YYYY, (Age), Passport: ...
   // Parse complete guest rows so footer dates and other numbers are ignored.
   const anexAlternativeRows = /\b(?:MRS|MR|MS|MISS|MSTR|CHD|INF|ADT|ADULT|CHILD)\s*,?\s*([A-Z][A-Z\s.'’-]{1,65}?)\s*\([^)]+\)\s*,\s*(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})\s*,\s*\(\d{1,3}\)\s*,\s*Passport\s*:/gi;
-  // A page can contain several bookings. Associate each guest with the closest
-  // preceding Res.No / Reservation No marker so a search returns the whole booking.
-  const reservationMarkers = Array.from(
-    clean.matchAll(/\b(?:Res\.?\s*No\.?|Reservation\s*No\.?)\s*[:#-]?\s*([A-Z0-9/-]+)/gi),
-    (match) => ({ index: match.index ?? 0, number: normalize(match[1]) }),
+  // In Anex voucher tables, the Res.No column heading appears only once.
+  // Each booking starts with: row number + reservation number + status + check-in date.
+  // Keep all guest rows between this marker and the next booking marker together.
+  const bookingStarts = Array.from(
+    clean.matchAll(/(?:^|\s)(\d{1,2})\s+(\d{7,8})\s+(?:new|changed)\s+\d{1,2}[./-]\d{1,2}[./-]\d{2,4}/gi),
+    (match) => ({ index: (match.index ?? 0) + (match[0].length - match[0].trimStart().length), reservationNo: match[2] }),
   );
-  const alternativePeople = Array.from(clean.matchAll(anexAlternativeRows), (match) => {
-    const guestIndex = match.index ?? 0;
-    const reservation = [...reservationMarkers].reverse().find((marker) => marker.index <= guestIndex);
-    return {
+  const bookingGroups = bookingStarts.map((start, index) => {
+    const end = bookingStarts[index + 1]?.index ?? clean.length;
+    const bookingText = clean.slice(start.index, end);
+    const people = Array.from(bookingText.matchAll(anexAlternativeRows), (match) => ({
       name: titleCaseAnexName(match[1]),
       dob: match[2].replace(/[.-]/g, "/"),
-      reservationNo: reservation?.number ?? "",
-    };
-  });
+    }));
+    return { reservationNo: start.reservationNo, people };
+  }).filter((group) => group.people.length > 0);
+
+  const alternativePeople = bookingGroups.length
+    ? bookingGroups.flatMap((group) => group.people.map((person) => ({
+        ...person,
+        reservationNo: group.reservationNo,
+      })))
+    : Array.from(clean.matchAll(anexAlternativeRows), (match) => ({
+        name: titleCaseAnexName(match[1]),
+        dob: match[2].replace(/[.-]/g, "/"),
+        reservationNo: "",
+      }));
+
   if (alternativePeople.length) {
     const normalizedSearch = normalize(searchTerm);
     if (!normalizedSearch) {
       return alternativePeople.map(({ name, dob }) => ({ name, dob }));
     }
 
-    const matchingPeople = alternativePeople.filter((person) =>
-      normalize(person.name).includes(normalizedSearch),
+    // Find the booking containing the searched guest, then return all guests
+    // from that same booking (not guests from adjacent reservations).
+    const matchingGroups = bookingGroups.filter((group) =>
+      group.people.some((person) => normalize(person.name).includes(normalizedSearch)),
     );
-    const matchingReservations = new Set(
-      matchingPeople.map((person) => person.reservationNo).filter(Boolean),
-    );
+    if (matchingGroups.length) {
+      return matchingGroups.flatMap((group) => group.people);
+    }
 
-    // Include every guest assigned to the same reservation as a matched guest.
     return alternativePeople
-      .filter((person) => matchingPeople.includes(person) ||
-        (person.reservationNo && matchingReservations.has(person.reservationNo)))
+      .filter((person) => normalize(person.name).includes(normalizedSearch))
       .map(({ name, dob }) => ({ name, dob }));
   }
 
