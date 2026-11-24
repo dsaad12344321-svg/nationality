@@ -311,17 +311,17 @@ function extractPeople(text: string, searchTerm: string, company = "") {
 
   // TUI Destimo voucher: the guest table prints "Surname / Given name(s) (F/M)".
   // If the search matches one guest, return the complete guest list from that voucher.
-  const isTuiVoucher = /\\bTUI\\s+Ref\\s*:/i.test(clean)
-    && /\\bSuper\\s+PNR\\s*:/i.test(clean)
-    && /\\bRoom\\s+types\\s*\\//i.test(clean)
-    && /\\bName\\s+Age\\s+Arrival\\s+Departure\\b/i.test(clean);
+  const isTuiVoucher = /\bTUI\s+Ref\s*:/i.test(clean)
+    && /\bSuper\s+PNR\s*:/i.test(clean)
+    && /\bRoom\s+types\s*\//i.test(clean)
+    && /\bName\s+Age\s+Arrival\s+Departure\b/i.test(clean);
   if (isTuiVoucher) {
-    const nameHeader = clean.search(/\\bName\\s+Age\\s+Arrival\\s+Departure\\b/i);
-    const roomHeader = clean.search(/\\bRoom\\s+types\\s*\\//i);
+    const nameHeader = clean.search(/\bName\s+Age\s+Arrival\s+Departure\b/i);
+    const roomHeader = clean.search(/\bRoom\s+types\s*\//i);
     const guestSection = nameHeader >= 0 && roomHeader > nameHeader
       ? clean.slice(nameHeader + "Name Age Arrival Departure".length, roomHeader)
       : "";
-    const tuiRowPattern = /([\\p{L}\\p{M}][\\p{L}\\p{M}'’.-]{1,50})\\s*\\/\\s*([\\p{L}\\p{M}][\\p{L}\\p{M}'’ .-]{0,60}?)\\s*\\(([FM])\\)/gu;
+    const tuiRowPattern = /([\p{L}\p{M}][\p{L}\p{M}'’.-]{1,50})\s*\/\s*([\p{L}\p{M}][\p{L}\p{M}'’ .-]{0,60}?)\s*\(([FM])\)/gu;
     const tuiPeople = Array.from(guestSection.matchAll(tuiRowPattern), (match) => ({
       name: titleCaseName(`${match[1].trim()} ${match[2].trim()}`),
       dob: "",
@@ -331,8 +331,8 @@ function extractPeople(text: string, searchTerm: string, company = "") {
       const matchesVoucher = !normalizedSearch || tuiPeople.some((person) => {
         const name = normalize(person.name);
         return name.includes(normalizedSearch)
-          || normalizedSearch.split(/\\s+/).filter(Boolean).every((token) =>
-            name.split(/\\s+/).some((part) => part.includes(token)),
+          || normalizedSearch.split(/\s+/).filter(Boolean).every((token) =>
+            name.split(/\s+/).some((part) => part.includes(token)),
           );
       });
       return matchesVoucher ? tuiPeople : [];
