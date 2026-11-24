@@ -210,7 +210,7 @@ function extractPeople(text: string, searchTerm: string) {
       return {
         sourceName: surname + "/" + givenNames,
         name: titleCaseName(givenNames + " " + surname),
-        dob: match[6] === "-" ? "لم يُعثر عليه" : match[6].replace(/[.-]/g, "/"),
+        dob: match[5] === "-" ? "لم يُعثر عليه" : match[5].replace(/[.-]/g, "/"),
       };
     });
     if (odeonPeople.length) {
