@@ -887,7 +887,7 @@ export default function GuestNameExtractorPage() {
   }
 
   async function copyGuestDetails(person: { name: string; dob: string }) {
-    const value = [person.name, person.dob].filter(Boolean).join(" - ");
+    const value = [person.name, person.dob === "لم يُعثر عليه" ? "" : person.dob].filter(Boolean).join(" - ");
     try {
       await navigator.clipboard.writeText(value);
       setDiagnosticStatus(`تم نسخ بيانات ${person.name}.`);
@@ -1044,7 +1044,7 @@ export default function GuestNameExtractorPage() {
           <h3>الأسماء وتواريخ الميلاد في الصفحة الحالية</h3>
           {extractedPeople.length ? <div className="folder-results">{extractedPeople.map((person, index) => (
             <div className="folder-result" key={index} dir="ltr" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, textAlign: "left", fontWeight: 700 }}>
-              <span>{selected.company.toLocaleLowerCase() === "easy jet" ? person.name : selected.company.toLocaleLowerCase() === "pegas" ? `${person.name} ${person.dob}` : `${person.name} - ${person.dob}`}</span>
+              <span>{selected.company.toLocaleLowerCase() === "easy jet" || !person.dob || person.dob === "لم يُعثر عليه" ? person.name : selected.company.toLocaleLowerCase() === "pegas" ? (person.name + " " + person.dob) : (person.name + " - " + person.dob)}</span>
               <button type="button" onClick={() => void copyGuestDetails(person)} title={`نسخ بيانات ${person.name}`} aria-label={`نسخ بيانات ${person.name}`} style={{ flex: "0 0 34px", width: 34, height: 34, display: "inline-flex", alignItems: "center", justifyContent: "center", border: "1px solid #e45b65", borderRadius: 7, background: "#fff", color: "#d93645", cursor: "pointer" }}>
                 <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h3"/></svg>
               </button>
