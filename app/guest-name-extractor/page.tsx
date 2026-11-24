@@ -118,15 +118,30 @@ function titleCaseName(value: string) {
     (_match, separator: string, letter: string) => separator + letter.toLocaleUpperCase());
 }
 
+function titleCaseAnexName(value: string) {
+  // Anex prints guest names as SURNAME GIVEN-NAME; show them as Given-name Surname.
+  const parts = value.trim().split(/\s+/).filter(Boolean);
+  return titleCaseName(parts.length > 1 ? [...parts.slice(1), parts[0]].join(" ") : value);
+}
+
 function extractPeople(text: string, searchTerm: string) {
   const clean = text.replace(/[\t|]+/g, " ").replace(/\s+/g, " ").trim();
 
-  // Anex vouchers place each guest on one row: title, name (citizenship), date of birth, age, passport.
-  // Parse each row as a unit so dates cannot become detached from the corresponding guest.
+  // Anex alternative voucher: each guest is printed as a comma-separated line:
+  // MRS, SURNAME GIVEN-NAME (Citizenship), DD/MM/YYYY, (Age), Passport: ...
+  // Parse complete guest rows so footer dates and other numbers are ignored.
+  const anexAlternativeRows = /\b(?:MRS|MR|MS|MISS|MSTR|CHD|INF|ADT|ADULT|CHILD)\s*,?\s*([A-Z][A-Z\s.'’-]{1,65}?)\s*\([^)]+\)\s*,\s*(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})\s*,\s*\(\d{1,3}\)\s*,\s*Passport\s*:/gi;
+  const alternativePeople = Array.from(clean.matchAll(anexAlternativeRows), (match) => ({
+    name: titleCaseAnexName(match[1]),
+    dob: match[2].replace(/[.-]/g, "/"),
+  }));
+  if (alternativePeople.length) return alternativePeople;
+
+  // Anex primary voucher: table with Clients names, citizenship / Date of born / Age.
   if (/clients\s*names\s*,?\s*citizenship/i.test(clean) && /date\s+of\s+born/i.test(clean)) {
     const anexRows = /\b(?:MRS|MR|MS|MISS|MSTR|CHD|INF|ADT|ADULT|CHILD)\b\s+([A-Z][A-Z\s.'’-]{1,65}?)\s*\([^)]+\)\s+(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})\s+\d{1,3}(?=\s|$)/gi;
     const people = Array.from(clean.matchAll(anexRows), (match) => ({
-      name: titleCaseName(match[1].trim()),
+      name: titleCaseAnexName(match[1]),
       dob: match[2].replace(/[.-]/g, "/"),
     }));
     if (people.length) return people;
