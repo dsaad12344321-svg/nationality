@@ -902,7 +902,7 @@ export default function GuestNameExtractorPage() {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {selected.extension === "msg" ? <button type="button" className="add-button" onClick={downloadOriginalMsg}>تنزيل الملف الأصلي لفتحه في Outlook</button> : <button type="button" className="add-button" onClick={printOriginal}>طباعة الملف</button>}
             <button type="button" className="add-button" onClick={() => void copyPageDiagnostics()}>نسخ بيانات الصفحة للتشخيص</button>
-            <button type="button" className="add-button" onClick={() => { setSelected(null); setMsgPreview(null); setActiveAttachment(null); }}>إغلاق المعاينة</button>
+            <button type="button" className="add-button" onClick={() => setSelected(null)}>إغلاق المعاينة</button>
           </div>
         </div>
         {selected.extension === "pdf" && <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "12px 0" }}>
