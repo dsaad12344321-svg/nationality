@@ -229,12 +229,15 @@ async function extractText(file: File, extension: string): Promise<{ content: st
     const recipientNames = (data.recipients || [])
       .map((recipient) => recipient.name)
       .filter((name): name is string => typeof name === "string" && Boolean(name.trim()));
+    const attachmentRows = Array.isArray(data.attachments) ? data.attachments as Array<Record<string, unknown>> : [];
+    const attachmentNames = attachmentRows.map((attachment) => String(attachment.fileName || attachment.name || "").trim()).filter(Boolean);
     const fields = [
       data.subject && `الموضوع: ${data.subject}`,
       data.senderName && `المرسل: ${data.senderName}`,
       data.senderEmail && `البريد الإلكتروني: ${data.senderEmail}`,
       data.clientSubmitTime && `تاريخ الإرسال: ${data.clientSubmitTime}`,
       recipientNames.length ? `المستلمون: ${recipientNames.join(", ")}` : "",
+      attachmentNames.length ? `المرفقات: ${attachmentNames.join(", ")}` : "",
       typeof data.body === "string" ? data.body : "",
       typeof data.headers === "string" ? `\n--- بيانات الرسالة ---\n${data.headers}` : "",
     ].filter((value): value is string => typeof value === "string" && Boolean(value.trim()));
@@ -632,9 +635,12 @@ export default function GuestNameExtractorPage() {
       .filter((item) => normalize(item.roomNo) === q || normalize(item.confirmationNo) === q)
       .map((item) => normalize(item.name));
     return files.flatMap((item) => {
+      const isMtsVoucherEmail = q === "mts" && item.extension === "msg"
+        && /guest\\s+voucher\\s+list/i.test(item.content);
       const matchedPages = item.pages.reduce<number[]>((acc, page, index) => {
         const searchable = normalize([item.name, item.path, item.company, page].join(" "));
-        if (searchable.includes(q) || matchingArrivalNames.some((name) => name && searchable.includes(name))) {
+        if (searchable.includes(q) || matchingArrivalNames.some((name) => name && searchable.includes(name))
+          || (isMtsVoucherEmail && index === 0)) {
           acc.push(index + 1);
         }
         return acc;
