@@ -146,7 +146,13 @@ function extractPeople(text: string, searchTerm: string) {
     name: titleCaseAnexName(match[1]),
     dob: match[2].replace(/[.-]/g, "/"),
   }));
-  if (alternativePeople.length) return alternativePeople;
+  if (alternativePeople.length) {
+    // When the user searched for a guest, show only matching guests from this voucher page.
+    const normalizedSearch = normalize(searchTerm);
+    return normalizedSearch
+      ? alternativePeople.filter((person) => normalize(person.name).includes(normalizedSearch))
+      : alternativePeople;
+  }
 
   // Anex primary voucher: table with Clients names, citizenship / Date of born / Age.
   if (/clients\s*names\s*,?\s*citizenship/i.test(clean) && /date\s+of\s+born/i.test(clean)) {
