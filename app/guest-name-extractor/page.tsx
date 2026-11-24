@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 type IndexedFile = {
   id: string; name: string; path: string; company: string; extension: string;
+  day?: string; month?: string;
   size: number; content: string; pages: string[]; file: File;
 };
 type SearchResult = IndexedFile & { matchedPages: number[] };
@@ -85,9 +86,27 @@ const SUPPORTED = new Set(["pdf", "docx", "msg", "txt", "csv", "xml", "html", "h
 const normalize = (value: string) =>
   value.toLocaleLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 
-function getCompany(path: string) {
+const MONTH_FOLDER_PATTERN = /^\\d{1,2}[._ -]?(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)(?:[._ -].*)?$/i;
+
+function getFolderMetadata(path: string): { company: string; day?: string; month?: string } {
   const parts = path.split("/").filter(Boolean);
-  return parts.length >= 3 ? parts[1] : "غير محددة";
+  if (parts.length < 2) return { company: "غير محددة" };
+
+  const root = parts[0];
+  const isMonthFolder = MONTH_FOLDER_PATTERN.test(root);
+  const isDayFolder = /^\\d{1,2}$/.test(root);
+  const nestedDay = isMonthFolder && /^\\d{1,2}$/.test(parts[1] || "");
+
+  // Daily upload: Day / Company / Booking file
+  // Monthly upload: Month / Day / Company / Booking file
+  const companyIndex = nestedDay ? 2 : 1;
+  const company = parts.length > companyIndex + 1 ? parts[companyIndex] : "غير محددة";
+
+  return {
+    company,
+    day: nestedDay ? parts[1] : isDayFolder ? root : undefined,
+    month: isMonthFolder ? root : undefined,
+  };
 }
 
 async function extractText(file: File, extension: string): Promise<{ content: string; pages: string[] }> {
@@ -335,8 +354,9 @@ export default function GuestNameExtractorPage() {
       const path = file.webkitRelativePath || file.name;
       try {
         const extracted = await extractText(file, extension);
+        const folderMetadata = getFolderMetadata(path);
         indexed.push({ id: path + "-" + file.lastModified + "-" + index, name: file.name, path,
-          company: getCompany(path), extension, size: file.size, content: extracted.content,
+          ...folderMetadata, extension, size: file.size, content: extracted.content,
           pages: extracted.pages, file });
       } catch { failed.push(path); }
       setProgress({ done: index + 1, total: readable.length });
@@ -512,7 +532,7 @@ export default function GuestNameExtractorPage() {
             <article className="folder-result" key={item.id + item.matchedPages.join(",")}>
               <div className="folder-result-top"><div>
                 <strong>{item.name}</strong>
-                <p className="muted">الشركة: {item.company} · النوع: {item.extension.toUpperCase()} · الحجم: {formatSize(item.size)}</p>
+                <p className="muted">الشركة: {item.company}{item.month ? ` · الشهر: ${item.month}` : ""}{item.day ? ` · اليوم: ${item.day}` : ""} · النوع: {item.extension.toUpperCase()} · الحجم: {formatSize(item.size)}</p>
                 <p className="muted">الصفحات المطابقة: {item.matchedPages.join(", ")}</p>
               </div><button type="button" className="add-button" onClick={() => openPreview(item)}>معاينة واستخراج</button></div>
               <p className="folder-path" dir="ltr">{item.path}</p>
