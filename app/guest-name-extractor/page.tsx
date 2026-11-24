@@ -499,6 +499,9 @@ export default function GuestNameExtractorPage() {
   const [msgPreview, setMsgPreview] = useState<MsgPreviewData | null>(null);
   const [msgPreviewError, setMsgPreviewError] = useState("");
   const [activeAttachment, setActiveAttachment] = useState<MsgAttachmentPreview | null>(null);
+  useEffect(() => () => {
+    msgPreview?.attachments.forEach((attachment) => URL.revokeObjectURL(attachment.url));
+  }, [msgPreview]);
   const [currentPage, setCurrentPage] = useState(1);
   const [restoreComplete, setRestoreComplete] = useState(false);
   const [storageMessage, setStorageMessage] = useState("جارٍ استعادة المجلد المحفوظ...");
@@ -737,7 +740,7 @@ export default function GuestNameExtractorPage() {
               xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             };
             const mime = String(row.attachMimeTag || mimeByExtension[extension] || "application/octet-stream");
-            const blob = new Blob([extracted.content], { type: mime });
+            const blob = new Blob([new Uint8Array(extracted.content).buffer as ArrayBuffer], { type: mime });
             return { name, type: mime, blob, url: URL.createObjectURL(blob), size: blob.size };
           });
           const html = typeof data.bodyHtml === "string" ? data.bodyHtml : "";
@@ -1013,7 +1016,7 @@ export default function GuestNameExtractorPage() {
               {activeAttachment && <div style={{ padding: 14, borderBottom: "1px solid #d5dce5", background: "#f4f7fb" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 10 }}>
                   <strong>{activeAttachment.name}</strong>
-                  <button type="button" className="add-button" onClick={() => setActiveAttachment(null)}>إغلاق المرفق</button>
+                  <button type="button" className="add-button" onClick={() => { const win = window.open(activeAttachment.url, "_blank"); if (win) win.addEventListener("load", () => { win.focus(); win.print(); }, { once: true }); }}>طباعة المرفق</button><button type="button" className="add-button" onClick={() => setActiveAttachment(null)}>إغلاق المرفق</button>
                 </div>
                 {activeAttachment.type.startsWith("image/") ? <img src={activeAttachment.url} alt={activeAttachment.name} style={{ maxWidth: "100%", maxHeight: 560, objectFit: "contain" }} /> :
                   activeAttachment.type === "application/pdf" ? <iframe title={activeAttachment.name} src={activeAttachment.url + "#toolbar=1"} style={{ width: "100%", height: 600, border: 0, background: "white" }} /> :
