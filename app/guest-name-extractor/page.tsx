@@ -332,7 +332,7 @@ function extractEaglePeople(text: string) {
   // The actual Eagle table ends before the commercial breakdown. Some
   // emails say "Waiting for your reply with confirmation", not the shorter
   // phrase used in older samples, so prefer the table's own boundary.
-  const endMatch = /\b(?:Breakdown\s*:?|Waiting\s+for\s+your\s+(?:reply\s+with\s+)?confirmation|Best\s+regards|From\s*:)\b/i.exec(tail);
+  const endMatch = /\b(?:Breakdown|Waiting\s+for\s+your\s+(?:reply\s+with\s+)?confirmation|Best\s+regards|From)\b/i.exec(tail);
   const table = endMatch ? tail.slice(0, endMatch.index) : tail.slice(0, 18000);
 
   const namePattern = /\b(?:Mr|Mrs|Ms|Miss)\.?\s+([\p{L}][\p{L}'’.-]{0,45})\s*\/\s*([\p{L}][\p{L}'’.-]*(?:\s+[\p{L}][\p{L}'’.-]*){0,2})/giu;
