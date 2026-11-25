@@ -311,7 +311,49 @@ function titleCaseAnexName(value: string) {
   return titleCaseName(parts.length > 1 ? [...parts.slice(1), parts[0]].join(" ") : value);
 }
 
+function expandEagleDob(value: string) {
+  const parts = value.trim().split(/[./-]/);
+  if (parts.length !== 3) return value;
+  const [day, month, rawYear] = parts;
+  const year = rawYear.length === 4
+    ? rawYear
+    : String(Number(rawYear) <= 29 ? 2000 + Number(rawYear) : 1900 + Number(rawYear));
+  return day.padStart(2, "0") + "." + month.padStart(2, "0") + "." + year;
+}
+
+function extractEaglePeople(text: string) {
+  // Eagle Travel Outlook rooming lists use a Names/Age table. Outlook's
+  // text extraction commonly places the guest-name column and DOB column
+  // in separate runs, so collect both columns in order and pair by index.
+  const header = /\bNames\b[\s\S]{0,100}\bAge\b[\s\S]{0,50}\bACC\b/i.exec(text);
+  if (!header || header.index === undefined) return [];
+  const start = header.index + header[0].indexOf("Names") + "Names".length;
+  const tail = text.slice(start);
+  const endMatch = /\b(?:Waiting\s+for\s+your\s+confirmation|Best\s+regards|From\s*:)\b/i.exec(tail);
+  const table = endMatch ? tail.slice(0, endMatch.index) : tail.slice(0, 18000);
+
+  const namePattern = /\b(?:Mr|Mrs|Ms|Miss)\.?\s+([\p{L}][\p{L}'’.-]{0,45})\s*\/\s*([\p{L}][\p{L}'’.-]*(?:\s+[\p{L}][\p{L}'’.-]*){0,2})/giu;
+  const names = Array.from(table.matchAll(namePattern), (match) =>
+    titleCaseName(match[1].trim() + " " + match[2].trim()),
+  );
+  const ageColumn = /\bAge\b([\s\S]*?)\bACC\b/i.exec(table);
+  const dateSource = ageColumn?.[1] || table;
+  const dates = Array.from(dateSource.matchAll(/\b(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})\b/g),
+    (match) => expandEagleDob(match[1]));
+
+  if (!names.length || names.length !== dates.length) return [];
+  return names.map((name, index) => ({ name, dob: dates[index] }));
+}
+
 function extractPeople(text: string, searchTerm: string, company = "") {
+  // Eagle Travel rooming lists are sent as Outlook email tables with surname/given-name
+  // entries in the Names column and matching two-digit DOBs in the Age column.
+  if (/^eagle(?:\\s*travel)?$/i.test(company.trim())
+    || /(?:eagletvl\\.com|Eagle\\s+Travel)/i.test(text)) {
+    const eaglePeople = extractEaglePeople(text);
+    if (eaglePeople.length) return eaglePeople;
+  }
+
   // AllTours hotel reservation forms store each guest in a titled table row:
   // "Mr SURNAME, GIVEN NAMES AGE". MSG attachments are indexed as extra pages,
   // so this same parser works for both standalone PDFs and Outlook attachments.
