@@ -348,8 +348,8 @@ function extractEaglePeople(text: string) {
 function extractPeople(text: string, searchTerm: string, company = "") {
   // Eagle Travel rooming lists are sent as Outlook email tables with surname/given-name
   // entries in the Names column and matching two-digit DOBs in the Age column.
-  if (/^eagle(?:\\s*travel)?$/i.test(company.trim())
-    || /(?:eagletvl\\.com|Eagle\\s+Travel)/i.test(text)) {
+  if (/^eagle(?:\s*travel)?$/i.test(company.trim())
+    || /(?:eagletvl\.com|Eagle\s+Travel)/i.test(text)) {
     const eaglePeople = extractEaglePeople(text);
     if (eaglePeople.length) return eaglePeople;
   }
