@@ -329,7 +329,10 @@ function extractEaglePeople(text: string) {
   if (!header || header.index === undefined) return [];
   const start = header.index + header[0].indexOf("Names") + "Names".length;
   const tail = text.slice(start);
-  const endMatch = /\b(?:Waiting\s+for\s+your\s+confirmation|Best\s+regards|From\s*:)\b/i.exec(tail);
+  // The actual Eagle table ends before the commercial breakdown. Some
+  // emails say "Waiting for your reply with confirmation", not the shorter
+  // phrase used in older samples, so prefer the table's own boundary.
+  const endMatch = /\b(?:Breakdown\s*:?|Waiting\s+for\s+your\s+(?:reply\s+with\s+)?confirmation|Best\s+regards|From\s*:)\b/i.exec(tail);
   const table = endMatch ? tail.slice(0, endMatch.index) : tail.slice(0, 18000);
 
   const namePattern = /\b(?:Mr|Mrs|Ms|Miss)\.?\s+([\p{L}][\p{L}'’.-]{0,45})\s*\/\s*([\p{L}][\p{L}'’.-]*(?:\s+[\p{L}][\p{L}'’.-]*){0,2})/giu;
@@ -943,7 +946,14 @@ export default function GuestNameExtractorPage() {
 
   const companies = useMemo(() => new Set(files.map((file) => file.company).filter((name) => name !== "غير محددة")).size, [files]);
   const totalSize = useMemo(() => files.reduce((sum, file) => sum + file.size, 0), [files]);
-  const pageText = selected?.pages[currentPage - 1] || "";
+  // MSG files are email messages, not paginated documents. Always parse their
+  // primary email body (pages[0]); currentPage may retain a page number from a
+  // previously opened PDF or point to an indexed PDF attachment.
+  const pageText = selected
+    ? selected.extension.toLowerCase() === "msg"
+      ? selected.pages[0] || ""
+      : selected.pages[currentPage - 1] || ""
+    : "";
   // AllTours booking references can be found on a different page from the
   // guest table. Parse the complete MSG/PDF page set for this company so a
   // search by voucher number still displays every guest in that booking.
