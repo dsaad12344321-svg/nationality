@@ -336,9 +336,9 @@ function extractEaglePeople(text: string) {
   const names = Array.from(table.matchAll(namePattern), (match) =>
     titleCaseName(match[1].trim() + " " + match[2].trim()),
   );
-  const ageColumn = /\bAge\b([\s\S]*?)\bACC\b/i.exec(table);
-  const dateSource = ageColumn?.[1] || table;
-  const dates = Array.from(dateSource.matchAll(/\b(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})\b/g),
+  // Dates are emitted in the same guest order as the Names column, although
+  // Outlook may place them after the names within each rooming-list row.
+  const dates = Array.from(table.matchAll(/\b(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})\b/g),
     (match) => expandEagleDob(match[1]));
 
   if (!names.length || names.length !== dates.length) return [];
