@@ -335,7 +335,7 @@ function extractEaglePeople(text: string) {
   const endMatch = /\b(?:Breakdown|Waiting\s+for\s+your\s+(?:reply\s+with\s+)?confirmation|Best\s+regards|From)\b/i.exec(tail);
   const table = endMatch ? tail.slice(0, endMatch.index) : tail.slice(0, 18000);
 
-  const namePattern = /\b(?:Mr|Mrs|Ms|Miss)\.?\s+([\p{L}][\p{L}'’.-]{0,45})\s*\/\s*([\p{L}][\p{L}'’.-]*(?:\s+[\p{L}][\p{L}'’.-]*){0,2})/giu;
+  const namePattern = /\b(?:Mr|Mrs|Ms|Miss)\.?\s+([\p{L}][\p{L}'’.-]{0,45})\s*\/\s*([\p{L}][\p{L}'’.-]*)/giu;
   const names = Array.from(table.matchAll(namePattern), (match) =>
     titleCaseName(match[1].trim() + " " + match[2].trim()),
   );
