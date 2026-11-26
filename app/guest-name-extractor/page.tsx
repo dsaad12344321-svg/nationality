@@ -1222,6 +1222,51 @@ export default function GuestNameExtractorPage() {
     }
   }
 
+  function printMsgImage(attachment: MsgAttachmentPreview) {
+    if (!attachment.type.startsWith("image/")) return;
+
+    // Open a dedicated print page for the selected Outlook image attachment.
+    // The popup is created directly from the button click to avoid blockers.
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      window.alert("يرجى السماح بالنوافذ المنبثقة حتى تتمكن من طباعة الصورة.");
+      return;
+    }
+
+    const safeName = attachment.name.replace(/[&<>"']/g, (character) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    })[character] || character);
+    printWindow.document.open();
+    printWindow.document.write(`<!doctype html>
+      <html lang="ar">
+        <head>
+          <meta charset="utf-8">
+          <title>${safeName}</title>
+          <style>
+            @page { margin: 10mm; }
+            html, body { margin: 0; padding: 0; background: #fff; }
+            body { min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+            img { display: block; max-width: 100%; max-height: 96vh; object-fit: contain; }
+            @media print { img { max-height: 275mm; } }
+          </style>
+        </head>
+        <body>
+          <img src="${attachment.url}" alt="${safeName}">
+          <script>
+            const image = document.querySelector("img");
+            image.addEventListener("load", () => {
+              window.focus();
+              window.print();
+            }, { once: true });
+            image.addEventListener("error", () => {
+              document.body.textContent = "تعذر تحميل الصورة للطباعة.";
+            }, { once: true });
+          </script>
+        </body>
+      </html>`);
+    printWindow.document.close();
+  }
+
   function printVoucher() {
     if (!selected) return;
     // Outlook MSG bookings: print the PDF voucher attached to the email,
@@ -1576,6 +1621,7 @@ export default function GuestNameExtractorPage() {
                       <div style={{ fontSize: 12, overflowWrap: "anywhere", marginBottom: 8 }}>📎 {attachment.name}<div style={{ color: "#778399", marginTop: 3 }}>{formatSize(attachment.size)}</div></div>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                         <button type="button" className="add-button" onClick={() => { setActiveAttachment(attachment); setAttachmentSearchQuery(""); setAttachmentSearchMatches([]); setAttachmentSearchStatus(""); setActiveAttachmentPage(1); setAttachmentPdfSearchTerm(""); }}>{attachment.type.startsWith("image/") ? "تكبير الصورة" : "فتح / عرض"}</button>
+                        {attachment.type.startsWith("image/") && <button type="button" className="add-button" onClick={() => printMsgImage(attachment)}>طباعة الصورة</button>}
                         <button type="button" className="add-button" onClick={() => downloadMsgAttachment(attachment)}>تنزيل</button>
                       </div>
                     </div>
