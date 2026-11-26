@@ -1480,6 +1480,24 @@ export default function GuestNameExtractorPage() {
                 <p className="muted">الصفحات المطابقة: {item.matchedPages.join(", ")}</p>
               </div><button type="button" className="add-button" onClick={() => openPreview(item)}>معاينة واستخراج</button></div>
               <p className="folder-path" dir="ltr">{item.path}</p>
+              {(() => {
+                if (!/eagle/i.test(item.company) || item.extension.toLowerCase() !== "msg") return null;
+                const eagleTable = item.pages.find((page) =>
+                  /\\bNames\\b[\\s\\S]{0,200}\\bAge\\b[\\s\\S]{0,100}\\bACC\\b/i.test(page),
+                ) || item.pages[0] || "";
+                const guests = extractPeople(eagleTable, query, item.company);
+                if (!guests.length) return null;
+                return (
+                  <div style={{ marginTop: 10, padding: 10, borderRadius: 8, background: "#f5f8fc", border: "1px solid #dbe4ef" }}>
+                    <strong style={{ display: "block", marginBottom: 7 }}>الأسماء المستخرجة تلقائياً: {guests.length}</strong>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "5px 12px" }} dir="ltr">
+                      {guests.map((person, index) => (
+                        <span key={index} style={{ fontSize: 13, textAlign: "left" }}>{person.name} - {person.dob}</span>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
             </article>
           ))}</div> : <p className="empty-exclusions">لا توجد ملفات تحتوي على كلمة البحث.</p>}
         </section>}
