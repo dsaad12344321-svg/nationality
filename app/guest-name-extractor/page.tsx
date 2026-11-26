@@ -354,7 +354,7 @@ function extractPeople(text: string, searchTerm: string, company = "") {
   const hasEagleRoomingTable = /\bNames\b[\s\S]{0,200}\bAge\b[\s\S]{0,100}\bACC\b/i.test(text);
   if (hasEagleRoomingTable
     || /^eagle(?:\s*travel)?$/i.test(company.trim())
-    || /(?:eagletvl\.com|Eagle\s+Travel)/i.test(text))
+    || /(?:eagletvl\.com|Eagle\s+Travel)/i.test(text)) {
     const eaglePeople = extractEaglePeople(text);
     if (eaglePeople.length) return eaglePeople;
   }
