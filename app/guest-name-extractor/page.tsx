@@ -351,10 +351,10 @@ function extractEaglePeople(text: string) {
 function extractPeople(text: string, searchTerm: string, company = "") {
   // Eagle Travel rooming lists are sent as Outlook email tables with surname/given-name
   // entries in the Names column and matching two-digit DOBs in the Age column.
-  const hasEagleRoomingTable = /\\bNames\\b[\\s\\S]{0,200}\\bAge\\b[\\s\\S]{0,100}\\bACC\\b/i.test(text);
+  const hasEagleRoomingTable = /\bNames\b[\s\S]{0,200}\bAge\b[\s\S]{0,100}\bACC\b/i.test(text);
   if (hasEagleRoomingTable
-    || /^eagle(?:\\s*travel)?$/i.test(company.trim())
-    || /(?:eagletvl\\.com|Eagle\\s+Travel)/i.test(text)) {
+    || /^eagle(?:\s*travel)?$/i.test(company.trim())
+    || /(?:eagletvl\.com|Eagle\s+Travel)/i.test(text))
     const eaglePeople = extractEaglePeople(text);
     if (eaglePeople.length) return eaglePeople;
   }
@@ -960,16 +960,16 @@ export default function GuestNameExtractorPage() {
   // guest table. Parse the complete MSG/PDF page set for this company so a
   // search by voucher number still displays every guest in that booking.
   const eagleTablePage = selected?.extension.toLowerCase() === "msg"
-    ? selected.pages.find((page) => /\\bNames\\b[\\s\\S]{0,200}\\bAge\\b[\\s\\S]{0,100}\\bACC\\b/i.test(page))
+    ? selected.pages.find((page) => /\bNames\b[\s\S]{0,200}\bAge\b[\s\S]{0,100}\bACC\b/i.test(page))
     : undefined;
   const peopleSourceText = selected && (
     /alltour/i.test(selected.company)
     || selected.pages.some((page) =>
-      /HOTEL\\s+RESERVATION\\s+FORM/i.test(page)
-      && /SURNAME,\\s*NAME/i.test(page)
-      && /VOUCHER\\s+NR/i.test(page),
+      /HOTEL\s+RESERVATION\s+FORM/i.test(page)
+      && /SURNAME,\s*NAME/i.test(page)
+      && /VOUCHER\s+NR/i.test(page),
     )
-  ) ? selected.pages.join("\\n\\n--- ALLTOUR PAGE BREAK ---\\n\\n")
+  ) ? selected.pages.join("\n\n--- ALLTOUR PAGE BREAK ---\n\n")
     : eagleTablePage || pageText;
   const extractedPeople = useMemo(
     () => extractPeople(peopleSourceText, query, selected?.company || ""),
