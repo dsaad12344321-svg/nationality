@@ -1483,7 +1483,7 @@ export default function GuestNameExtractorPage() {
               {(() => {
                 if (!/eagle/i.test(item.company) || item.extension.toLowerCase() !== "msg") return null;
                 const eagleTable = item.pages.find((page) =>
-                  /\\bNames\\b[\\s\\S]{0,200}\\bAge\\b[\\s\\S]{0,100}\\bACC\\b/i.test(page),
+                  /\bNames\b[\s\S]{0,200}\bAge\b[\s\S]{0,100}\bACC\b/i.test(page),
                 ) || item.pages[0] || "";
                 const guests = extractPeople(eagleTable, query, item.company);
                 if (!guests.length) return null;
