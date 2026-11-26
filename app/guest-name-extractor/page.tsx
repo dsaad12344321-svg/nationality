@@ -1481,18 +1481,27 @@ export default function GuestNameExtractorPage() {
               </div><button type="button" className="add-button" onClick={() => openPreview(item)}>معاينة واستخراج</button></div>
               <p className="folder-path" dir="ltr">{item.path}</p>
               {(() => {
-                if (!/eagle/i.test(item.company) || item.extension.toLowerCase() !== "msg") return null;
-                const eagleTable = item.pages.find((page) =>
-                  /\bNames\b[\s\S]{0,200}\bAge\b[\s\S]{0,100}\bACC\b/i.test(page),
-                ) || item.pages[0] || "";
-                const guests = extractPeople(eagleTable, query, item.company);
-                if (!guests.length) return null;
+                // Preview extracted guests for every company using the same
+                // company-specific parser used by the document preview.
+                const pagesToParse = item.matchedPages.length
+                  ? item.matchedPages.map((pageNumber) => item.pages[pageNumber - 1]).filter(Boolean)
+                  : [item.pages[0] || ""];
+                const guests = pagesToParse.flatMap((pageText) =>
+                  extractPeople(pageText, query, item.company),
+                );
+                const uniqueGuests = guests.filter((person, index, all) =>
+                  all.findIndex((candidate) =>
+                    normalize(candidate.name) === normalize(person.name)
+                    && normalize(candidate.dob) === normalize(person.dob),
+                  ) === index,
+                );
+                if (!uniqueGuests.length) return null;
                 return (
                   <div style={{ marginTop: 10, padding: 10, borderRadius: 8, background: "#f5f8fc", border: "1px solid #dbe4ef" }}>
-                    <strong style={{ display: "block", marginBottom: 7 }}>الأسماء المستخرجة تلقائياً: {guests.length}</strong>
+                    <strong style={{ display: "block", marginBottom: 7 }}>الأسماء المستخرجة تلقائياً: {uniqueGuests.length}</strong>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "5px 12px" }} dir="ltr">
-                      {guests.map((person, index) => (
-                        <span key={index} style={{ fontSize: 13, textAlign: "left" }}>{person.name} - {person.dob}</span>
+                      {uniqueGuests.map((person, index) => (
+                        <span key={index} style={{ fontSize: 13, textAlign: "left" }}>{person.name}{person.dob ? " - " + person.dob : ""}</span>
                       ))}
                     </div>
                   </div>
