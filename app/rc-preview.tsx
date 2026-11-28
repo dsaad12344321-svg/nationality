@@ -96,7 +96,8 @@ export default function RCPreview() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const inhInputRef = useRef<HTMLInputElement>(null);\n  const folderInputRef = useRef<HTMLInputElement>(null);
+  const inhInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
   const pdfEntries = useMemo(
     () => registrations.entries.filter((entry) => entry.name.toLowerCase().endsWith(".pdf")),
