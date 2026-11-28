@@ -48,34 +48,47 @@ export async function POST(request: Request) {
   try {
     const form = await request.formData();
     const resFile = form.get("resFile");
+    const rawReportRooms = form.get("reportRooms");
+    const rawReportFileName = form.get("reportFileName");
     const rawPdfRooms = form.get("pdfRooms");
     const rawPdfFiles = form.get("pdfFiles");
 
-    if (!(resFile instanceof File) || typeof rawPdfRooms !== "string" || typeof rawPdfFiles !== "string") {
-      return NextResponse.json({ error: "من فضلك ارفع تقرير RES_DETAIL.xml واختر ملف ZIP يحتوي على ملفات PDF." }, { status: 400 });
-    }
-    if (!resFile.name.toLowerCase().endsWith(".xml")) {
-      return NextResponse.json({ error: "تقرير الوصول يجب أن يكون بصيغة XML." }, { status: 400 });
-    }
-    if (resFile.size > 20 * 1024 * 1024) {
-      return NextResponse.json({ error: "حجم تقرير RES_DETAIL يجب ألا يتجاوز 20 ميجابايت." }, { status: 413 });
+    if (typeof rawPdfRooms !== "string" || typeof rawPdfFiles !== "string") {
+      return NextResponse.json({ error: "من فضلك اختر تقرير الوصول وملفات الحجوزات." }, { status: 400 });
     }
 
-    let root: XmlValue;
-    try {
-      root = parser.parse(await resFile.text());
-    } catch {
-      return NextResponse.json({ error: "تعذر قراءة RES_DETAIL.xml. تأكد أن التقرير سليم." }, { status: 400 });
-    }
+    let reportRooms: string[] = [];
+    if (typeof rawReportRooms === "string") {
+      let suppliedReportRooms: unknown;
+      try { suppliedReportRooms = JSON.parse(rawReportRooms); }
+      catch { return NextResponse.json({ error: "تعذر قراءة قائمة الغرف المستخرجة من arr.pdf." }, { status: 400 }); }
+      if (!Array.isArray(suppliedReportRooms)) {
+        return NextResponse.json({ error: "قائمة غرف arr.pdf غير صالحة." }, { status: 400 });
+      }
+      reportRooms = [...new Set(suppliedReportRooms.map(normalizeRoom).filter(Boolean))]
+        .sort((a, b) => Number(a) - Number(b));
+      if (typeof rawReportFileName !== "string" || !rawReportFileName.toLowerCase().endsWith(".pdf")) {
+        return NextResponse.json({ error: "اسم تقرير PDF غير صالح." }, { status: 400 });
+      }
+    } else {
+      if (!(resFile instanceof File) || !resFile.name.toLowerCase().endsWith(".xml")) {
+        return NextResponse.json({ error: "ارفع تقرير RES_DETAIL.xml أو arr.pdf." }, { status: 400 });
+      }
+      if (resFile.size > 20 * 1024 * 1024) {
+        return NextResponse.json({ error: "حجم تقرير RES_DETAIL يجب ألا يتجاوز 20 ميجابايت." }, { status: 413 });
+      }
+      let root: XmlValue;
+      try { root = parser.parse(await resFile.text()); }
+      catch { return NextResponse.json({ error: "تعذر قراءة RES_DETAIL.xml. تأكد أن التقرير سليم." }, { status: 400 }); }
 
-    const reservations = collect(root, "G_RESERVATION");
-    if (!reservations.length) {
-      return NextResponse.json({ error: "لم يتم العثور على سجلات G_RESERVATION. تأكد أنك رفعت تقرير RES_DETAIL المستخدم في Journal Detector." }, { status: 404 });
+      const reservations = collect(root, "G_RESERVATION");
+      if (!reservations.length) {
+        return NextResponse.json({ error: "لم يتم العثور على سجلات G_RESERVATION. تأكد أنك رفعت تقرير RES_DETAIL المستخدم في Journal Detector." }, { status: 404 });
+      }
+      reportRooms = [...new Set(reservations.map((reservation) =>
+        normalizeRoom(textValue(reservation.ROOM_NO) || textValue(reservation.DISP_ROOM_NO))
+      ).filter(Boolean))].sort((a, b) => Number(a) - Number(b));
     }
-
-    const reportRooms = [...new Set(reservations.map((reservation) =>
-      normalizeRoom(textValue(reservation.ROOM_NO) || textValue(reservation.DISP_ROOM_NO))
-    ).filter(Boolean))].sort((a, b) => Number(a) - Number(b));
 
     if (!reportRooms.length) {
       return NextResponse.json({ error: "تمت قراءة التقرير، لكن لم يتم العثور على أرقام غرف مكونة من 3 أو 4 خانات." }, { status: 404 });
@@ -85,7 +98,7 @@ export async function POST(request: Request) {
     try {
       suppliedRooms = JSON.parse(rawPdfRooms);
     } catch {
-      return NextResponse.json({ error: "تعذر قراءة قائمة الغرف المستخرجة من ZIP." }, { status: 400 });
+      return NextResponse.json({ error: "تعذر قراءة قائمة الغرف المستخرجة من ملفات PDF." }, { status: 400 });
     }
     if (!Array.isArray(suppliedRooms)) {
       return NextResponse.json({ error: "قائمة غرف ملفات PDF غير صالحة." }, { status: 400 });
