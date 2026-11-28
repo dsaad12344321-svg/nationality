@@ -1,18 +1,21 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useFileLibrary } from "../file-library-provider";
+import voucherRules from "./voucher-extraction-rules.json";
 
 type IndexedFile = {
   id: string; name: string; path: string; company: string; extension: string;
   day?: string; month?: string;
-  size: number; content: string; pages: string[]; file: File;
+  size: number; content: string; pages: string[]; visualPages?: string[];
+  attachmentPages?: { name: string; pages: string[] }[]; file: File;
 };
 type SearchResult = IndexedFile & { matchedPages: number[] };
 type MsgAttachmentPreview = { name: string; type: string; blob: Blob; url: string; size: number };
 type AttachmentSearchMatch = { page: number; excerpt: string };
 type MsgPreviewData = { subject: string; sender: string; senderEmail: string; to: string; cc: string; sent: string; bodyHtml: string; bodyText: string; attachments: MsgAttachmentPreview[] };
 
-type ArrivalRecord = { roomNo: string; name: string; confirmationNo: string; arrivalTime: string };
+type ArrivalRecord = { roomNo: string; name: string; confirmationNo: string; arrivalTime: string; company?: string };
 
 const ARRIVAL_REPORT_KEY = "nationality-arrival-report-v1";
 
@@ -70,6 +73,8 @@ async function extractArrivalReport(file: File): Promise<ArrivalRecord[]> {
 
       const rowText = roomLine[2];
       const companyMarker = rowText.search(/\s+T\s*-/i);
+      const companyText = companyMarker >= 0 ? rowText.slice(companyMarker).replace(/^\s*T\s*-\s*/i, "").trim() : "";
+      const company = companyText ? canonicalizeArrivalCompany(companyText) : "";
       let guestName = companyMarker >= 0 ? rowText.slice(0, companyMarker).trim() : "";
       if (!guestName) {
         const titledName = rowText.match(/^(.+?,\s*(?:Mr|Mrs|Ms|Miss|Mstr|Master)\.?)\b/i);
@@ -102,101 +107,163 @@ async function extractArrivalReport(file: File): Promise<ArrivalRecord[]> {
           name: guestName.replace(/\s+/g, " "),
           confirmationNo,
           arrivalTime,
+          company: company || undefined,
         });
       }
     }
   }
 
+  // A confirmation number can be shared by different guests/rooms.
+  // Deduplicate only identical room + guest + confirmation records.
   const unique = new Map<string, ArrivalRecord>();
-  for (const record of records) unique.set(record.confirmationNo, record);
+  for (const record of records) {
+    const key = `${record.roomNo}|${normalize(record.name)}|${record.confirmationNo}`;
+    unique.set(key, record);
+  }
   return Array.from(unique.values());
 }
 
-const GUEST_DB_NAME = "nationality-guest-files";
-const GUEST_DB_VERSION = 1;
-const GUEST_STORE_NAME = "files";
+const NATIVE_FOLDER_KEY = "long-beach-native-reservation-folder-v1";
 const GUEST_STATE_KEY = "nationality-guest-extractor-state-v1";
-async function readBrowserStorageEstimate(): Promise<{ usage: number; quota: number } | null> {
-  if (typeof navigator === "undefined" || !navigator.storage?.estimate) return null;
-  const estimate = await navigator.storage.estimate();
-  if (typeof estimate.quota !== "number") return null;
-  return { usage: estimate.usage ?? 0, quota: estimate.quota };
-}
-
-function formatStorageMB(bytes: number) {
-  return (bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1) + "MB";
-}
-
-
-function openGuestFilesDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(GUEST_DB_NAME, GUEST_DB_VERSION);
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains(GUEST_STORE_NAME)) {
-        db.createObjectStore(GUEST_STORE_NAME, { keyPath: "id" });
-      }
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || new Error("تعذر فتح قاعدة البيانات المحلية."));
-  });
-}
-
-async function saveGuestFiles(files: IndexedFile[]): Promise<void> {
-  const db = await openGuestFilesDB();
-  await new Promise<void>((resolve, reject) => {
-    const transaction = db.transaction(GUEST_STORE_NAME, "readwrite");
-    const store = transaction.objectStore(GUEST_STORE_NAME);
-    store.clear();
-    for (const file of files) store.put(file);
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error || new Error("تعذر حفظ الملفات."));
-    transaction.onabort = () => reject(transaction.error || new Error("تم إلغاء حفظ الملفات."));
-  });
-  db.close();
-}
-
-async function loadGuestFiles(): Promise<IndexedFile[]> {
-  const db = await openGuestFilesDB();
-  const files = await new Promise<IndexedFile[]>((resolve, reject) => {
-    const transaction = db.transaction(GUEST_STORE_NAME, "readonly");
-    const request = transaction.objectStore(GUEST_STORE_NAME).getAll();
-    request.onsuccess = () => resolve((request.result || []) as IndexedFile[]);
-    request.onerror = () => reject(request.error || new Error("تعذر استعادة الملفات."));
-  });
-  db.close();
-  return files.filter((item) => item.file instanceof Blob).map((item) => {
-    const storedBlob = item.file as Blob;
-    const restoredFile = storedBlob instanceof File
-      ? storedBlob
-      : new File([storedBlob], item.name, { type: storedBlob.type });
-    return { ...item, file: restoredFile } as IndexedFile;
-  });
-}
-
-async function clearGuestFiles(): Promise<void> {
-  const db = await openGuestFilesDB();
-  await new Promise<void>((resolve, reject) => {
-    const transaction = db.transaction(GUEST_STORE_NAME, "readwrite");
-    transaction.objectStore(GUEST_STORE_NAME).clear();
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error || new Error("تعذر حذف الملفات المحفوظة."));
-  });
-  db.close();
-}
-
-const SUPPORTED = new Set(["pdf", "docx", "msg", "txt", "csv", "xml", "html", "htm", "eml", "log"]);
+const SUPPORTED = new Set(["pdf", "png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff", "docx", "msg", "txt", "csv", "xml", "html", "htm", "eml", "log"]);
 const normalize = (value: string) =>
   value.toLocaleLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 
-// Arrival reports may use "SURNAME, Mr. GIVEN" while vouchers use
-// "MR. SURNAME GIVEN". Match meaningful name parts regardless of order.
+function canonicalizeArrivalCompany(value: string) {
+  const raw = value.replace(/^T\s*-\s*/i, "").trim();
+  const cleaned = normalize(raw);
+  // Some arrival-report exports append stay dates and operational codes to
+  // the supplier name. Resolve known multi-word suppliers before stripping
+  // that metadata so all rows group under one canonical company.
+  if (/^easy\s*jet(?:\s+tours?)?\b/.test(cleaned)) return "Easy Jet";
+  if (/^planet(?:\s+tours?)?\b/.test(cleaned)) return "Planet";
+  if (/^house\s+use\b/.test(cleaned)) return "House use";
+  if (/^l\s+tur\b/.test(cleaned)) return "L tur";
+  if (/^tui(?:\s+destimo)?\b/.test(cleaned)) return "TUI";
+  if (/biblio|biblo/.test(cleaned)) return "biblio";
+  if (/anex/.test(cleaned)) return "Anex";
+  if (/(^|\s)mts(\s|$)/.test(cleaned)) return "MTS";
+  if (/odeon/.test(cleaned)) return "Odeon";
+  if (/fun\s*sun|funsun/.test(cleaned)) return "FUN&SUN";
+  if (/sun international|sunint/.test(cleaned)) return "SUN International";
+  if (/w2m|world 2 meet|world2meet/.test(cleaned)) return "W2M";
+  if (/tez/.test(cleaned)) return "TEZ";
+  if (/travel ways/.test(cleaned)) return "Travel Ways";
+  if (/hotel direct/.test(cleaned)) return "Hotel Direct";
+  // Generic supplier labels may also be followed by DD-MM-YY dates and
+  // reservation/operational metadata. Keep only the company-name prefix.
+  return raw.replace(/\s+\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}\b[\s\S]*$/, "").trim() || raw;
+}
+
+function normalizeCompanyKey(value: string) {
+  return normalize(canonicalizeArrivalCompany(value)).replace(/\s+/g, "");
+}
+
+function getMultipleCompanyQuery(value: string) {
+  const key = normalize(value).replace(/\s+/g, "");
+  const aliases: Record<string, string> = {
+    planet: "Planet", planettours: "Planet",
+    w2m: "W2M", world2meet: "W2M",
+    tui: "TUI", tuidestimo: "TUI",
+    ltur: "L tur",
+    biblio: "biblio", biblioglobus: "biblio", biblo: "biblio",
+    anex: "Anex", anextours: "Anex",
+    mts: "MTS", odeon: "Odeon", tez: "TEZ",
+    funsun: "FUN&SUN", suninternational: "SUN International",
+  };
+  return aliases[key] || "";
+}
+
+function isCompanyFolderMatch(fileCompany: string, requestedCompany: string, files: IndexedFile[]) {
+  const requested = normalizeCompanyKey(requestedCompany);
+  const actual = normalizeCompanyKey(fileCompany);
+  if (requested === actual) return true;
+  // L tur uses the TUI voucher layout. Fall back to the TUI folder only
+  // when the indexed booking tree contains no L tur folder.
+  if (requested === "ltur") {
+    const hasLturFolder = files.some((file) => normalizeCompanyKey(file.company) === "ltur");
+    return !hasLturFolder && actual === "tui";
+  }
+  return false;
+}
+
+function getPreviewMimeType(extension: string) {
+  const mimeTypes: Record<string, string> = {
+    pdf: "application/pdf", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
+    gif: "image/gif", webp: "image/webp", bmp: "image/bmp", tif: "image/tiff", tiff: "image/tiff",
+  };
+  return mimeTypes[extension.toLowerCase()] || "application/octet-stream";
+}
+
+type VoucherRule = { id: string; company: string; aliases: string[]; parser: string; signatures: string[]; bookingIdentifiers: string[]; guestFields: string[] };
+const configuredVoucherRules = voucherRules as { version: number; rules: VoucherRule[]; searchFields: string[] };
+
+function isFunSunAlias(value: string) {
+  const cleaned = value.replace(/&#x0*20;|&#0*32;|&nbsp;/gi, " ").replace(/\s+/g, " ").trim().toLocaleLowerCase();
+  return /^(?:fun(?:\s*(?:&|and)?\s*sun)?|fun\s*sun)$/.test(cleaned);
+}
+
+function detectVoucherCompany(text: string, currentCompany = "") {
+  if (/noreply@w2m\.com|world\s*2\s*meet|world2meet/i.test(text)
+    || (/\bBooking\s+Code\b/i.test(text)
+      && /\bPassenger\s+Name\b/i.test(text)
+      && /\bPassenger\s+Last\s+Name\b/i.test(text))) return "W2M";
+  if (/FUN\s*&\s*SUN|FUN\s+SUN|FUN\s+AND\s+SUN|EX\s+TUI\s+RUSSIA/i.test(text) || isFunSunAlias(currentCompany)) {
+    return currentCompany && currentCompany !== "غير محددة" ? currentCompany : "FUN&SUN";
+  }
+  if (currentCompany.trim() && currentCompany.trim() !== "غير محددة") return currentCompany.trim();
+  // SUN can be identified from its own branding or its distinctive passenger
+  // table, even when the PDF omits the company heading.
+  if (/\bSUN\s+INTERNATIONAL\b|\bSUNBUG\b/i.test(text)
+    || (/\bHOTEL\s+C\/IN\s+LIST\b/i.test(text)
+      && /\bVoucher\b/i.test(text)
+      && /\bSurname,\s*Name\b/i.test(text)
+      && /\bAge\/B\.Date\b/i.test(text))
+    || (/passenger\s+informations/i.test(text)
+      && /surname\s*,?\s*name/i.test(text)
+      && /\bbirthdate\b/i.test(text)
+      && /\btitle\b/i.test(text)
+      && /\bage\b/i.test(text))) return "SUN International";
+  for (const rule of configuredVoucherRules.rules) {
+    if (rule.signatures.length && rule.signatures.every((pattern) => {
+      try { return new RegExp(pattern, "i").test(text); } catch { return false; }
+    })) return rule.company;
+  }
+  return currentCompany || "غير محددة";
+}
+
+function matchesSearchText(searchableText: string, query: string) {
+  const haystack = normalize(searchableText);
+  const needle = normalize(query);
+  if (!needle) return false;
+  const compactNeedle = needle.replace(/\s+/g, "");
+  if (/^\d+$/.test(compactNeedle)) return haystack.replace(/\s+/g, "").includes(compactNeedle);
+  const tokens = needle.split(/\s+/).filter(Boolean);
+  return tokens.length > 1 ? tokens.every((token) => haystack.includes(token)) : haystack.includes(needle);
+}
+
+
+// Arrival reports may contain compound surnames (e.g. "LOPES PEREIRA, Rosa")
+// while a supplier voucher may store only "PEREIRA ROSA". Search each
+// meaningful name part independently so a missing surname component does not
+// hide an otherwise valid booking. Titles and very short tokens are ignored.
 const arrivalNameMatchesText = (arrivalName: string, searchableText: string) => {
-  const ignored = new Set(["mr", "mrs", "ms", "miss", "mstr", "master"]);
-  const tokens = normalize(arrivalName).split(/\s+/).filter((token) => token.length > 1 && !ignored.has(token));
+  const ignored = new Set(["mr", "mrs", "ms", "miss", "mstr", "master", "chd", "child", "inf", "adt", "adult"]);
+  const tokens = normalize(arrivalName)
+    .split(/\s+/)
+    .filter((token) => token.length >= 3 && !ignored.has(token));
+  if (!tokens.length) return false;
   const searchable = ` ${normalize(searchableText)} `;
-  return tokens.length >= 2 && tokens.every((token) => searchable.includes(` ${token} `));
+  return tokens.some((token) => searchable.includes(` ${token} `));
 };
+
+const SUN_IGNORED_TITLE_TOKENS = new Set([
+  "mr", "mrs", "ms", "miss", "mstr", "master", "chd", "child", "inf", "adt", "adult",
+]);
+
+function getSunSearchTokens(value: string) {
+  return normalize(value).split(/\s+/).filter((token) => token && !SUN_IGNORED_TITLE_TOKENS.has(token));
+}
 
 const MONTH_FOLDER_PATTERN = /^\\d{1,2}[._ -]?(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)(?:[._ -].*)?$/i;
 
@@ -221,7 +288,28 @@ function getFolderMetadata(path: string): { company: string; day?: string; month
   };
 }
 
-async function extractText(file: File, extension: string): Promise<{ content: string; pages: string[] }> {
+function getNativeFolderMetadata(relativePath: string): { company: string; day?: string; month?: string } {
+  const parts = relativePath.split("/").filter(Boolean);
+  const monthIndex = parts.findIndex((part) => MONTH_FOLDER_PATTERN.test(part));
+  if (monthIndex >= 0) {
+    const dayIndex = monthIndex + 1;
+    return {
+      month: parts[monthIndex],
+      day: /^\\d{1,2}$/.test(parts[dayIndex] || "") ? parts[dayIndex] : undefined,
+      company: parts[dayIndex + 1] || parts[dayIndex] || "غير محددة",
+    };
+  }
+  if (/^\\d{1,2}$/.test(parts[0] || "")) {
+    return { day: parts[0], company: parts[1] || "غير محددة" };
+  }
+  return { company: parts.length > 1 ? parts[0] : "غير محددة" };
+}
+
+async function extractText(file: File, extension: string): Promise<{ content: string; pages: string[]; visualPages?: string[]; attachmentPages?: { name: string; pages: string[] }[] }> {
+  // Images are indexed by filename and previewed directly; OCR is not attempted here.
+  if (["png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff"].includes(extension)) {
+    return { content: "", pages: [""] };
+  }
   if (["txt", "csv", "xml", "html", "htm", "eml", "log"].includes(extension)) {
     const content = await file.text();
     return { content, pages: [content] };
@@ -241,6 +329,23 @@ async function extractText(file: File, extension: string): Promise<{ content: st
       .filter((name): name is string => typeof name === "string" && Boolean(name.trim()));
     const attachmentRows = Array.isArray(data.attachments) ? data.attachments as unknown as Array<Record<string, unknown>> : [];
     const attachmentNames = attachmentRows.map((attachment) => String(attachment.fileName || attachment.name || "").trim()).filter(Boolean);
+    const htmlBodyValue = (data as unknown as { bodyHtml?: string | Uint8Array; html?: string | Uint8Array }).bodyHtml
+      || (data as unknown as { html?: string | Uint8Array }).html;
+    const htmlBodyText = htmlBodyValue ? htmlToPlainText(htmlBodyValue) : "";
+    let compressedRtfText = "";
+    const compressedRtf = (data as unknown as { compressedRtf?: Uint8Array }).compressedRtf;
+    if (compressedRtf && compressedRtf.byteLength) {
+      try {
+        const { decompressRTF } = await import("@kenjiuno/decompressrtf");
+        const decompressed = decompressRTF(Array.from(compressedRtf));
+        const decodedRtf = rtfToPlainText(new TextDecoder("windows-1252").decode(new Uint8Array(decompressed)));
+        compressedRtfText = /<(?:html|body|table|tr|td)\b/i.test(decodedRtf)
+          ? htmlToPlainText(decodedRtf)
+          : decodedRtf;
+      } catch {
+        // Some messages contain a corrupt RTF stream; retain their plain/HTML body.
+      }
+    }
     const fields = [
       data.subject && `الموضوع: ${data.subject}`,
       data.senderName && `المرسل: ${data.senderName}`,
@@ -249,9 +354,11 @@ async function extractText(file: File, extension: string): Promise<{ content: st
       recipientNames.length ? `المستلمون: ${recipientNames.join(", ")}` : "",
       attachmentNames.length ? `المرفقات: ${attachmentNames.join(", ")}` : "",
       typeof data.body === "string" ? data.body : "",
+      htmlBodyText,
+      compressedRtfText,
       typeof data.headers === "string" ? `\n--- بيانات الرسالة ---\n${data.headers}` : "",
     ].filter((value): value is string => typeof value === "string" && Boolean(value.trim()));
-    const content = fields.join("\n\n").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, " ").trim();
+    const content = Array.from(new Set(fields)).join("\n\n").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, " ").trim();
     if (!content || !/[\p{L}\p{N}]/u.test(content)) {
       throw new Error("تعذر استخراج نص مقروء من ملف Outlook MSG.");
     }
@@ -261,41 +368,101 @@ async function extractText(file: File, extension: string): Promise<{ content: st
     const msgReader = message as unknown as {
       getAttachment: (attachment: unknown) => { fileName?: string; content: Uint8Array };
     };
-    const attachmentPages: string[] = [];
+    const attachmentPages: { name: string; pages: string[] }[] = [];
     for (const attachment of attachmentRows) {
       const attachmentName = String(attachment.fileName || attachment.name || "").trim();
-      if (!attachmentName.toLowerCase().endsWith(".pdf")) continue;
+      const attachmentExtension = attachmentName.split(".").pop()?.toLowerCase() || "";
       try {
         const extractedAttachment = msgReader.getAttachment(attachment);
-        const pdfjs = await import("pdfjs-dist");
-        pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
-        const pdf = await pdfjs.getDocument({
-          data: new Uint8Array(extractedAttachment.content),
-        }).promise;
-        for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
-          const page = await pdf.getPage(pageNumber);
-          const pageContent = await page.getTextContent();
-          attachmentPages.push(pageContent.items
-            .map((item) => ("str" in item ? item.str : ""))
-            .join(" "));
-        }
+        const attachmentBytes = new Uint8Array(extractedAttachment.content);
+
+        const extractedPages: string[] = [];
+        if (attachmentExtension === "pdf") {
+          const pdfjs = await import("pdfjs-dist");
+          pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+          const pdf = await pdfjs.getDocument({ data: attachmentBytes }).promise;
+          for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+            const page = await pdf.getPage(pageNumber);
+            const pageContent = await page.getTextContent();
+            // Keep PDF table cells in visual reading order (top-to-bottom,
+            // then left-to-right). Some suppliers emit DOB cells before the
+            // guest-name cells in the PDF's internal object order.
+            const positionedItems = pageContent.items
+              .filter((item): item is typeof item & { str: string; transform: number[] } =>
+                "str" in item && "transform" in item && Boolean(item.str?.trim()))
+              .map((item) => ({
+                text: item.str.trim(),
+                x: item.transform[4],
+                y: item.transform[5],
+              }));
+            const visualRows: { y: number; cells: { x: number; text: string }[] }[] = [];
+            for (const item of positionedItems) {
+              let row = visualRows.find((candidate) => Math.abs(candidate.y - item.y) <= 2);
+              if (!row) {
+                row = { y: item.y, cells: [] };
+                visualRows.push(row);
+              }
+              row.cells.push({ x: item.x, text: item.text });
+            }
+            extractedPages.push(visualRows.sort((a, b) => b.y - a.y).map((row) => row.cells.sort((a, b) => a.x - b.x).map((cell) => cell.text).join(" ")).join("\n"));
+          }
+        } else if (attachmentExtension === "docx") {
+          const mammoth = await import("mammoth/mammoth.browser");
+          const result = await mammoth.extractRawText({
+            arrayBuffer: attachmentBytes.buffer.slice(
+              attachmentBytes.byteOffset,
+              attachmentBytes.byteOffset + attachmentBytes.byteLength,
+            ) as ArrayBuffer,
+          });
+          if (result.value?.trim()) extractedPages.push(result.value);
+        } else if (["txt", "csv", "xml", "html", "htm", "eml", "log"].includes(attachmentExtension)) {
+          const text = new TextDecoder().decode(attachmentBytes);
+          if (text.trim()) extractedPages.push(text);
+        }        if (extractedPages.length) attachmentPages.push({ name: attachmentName, pages: extractedPages });
       } catch {
         // Keep the MSG searchable even if one attachment cannot be parsed.
       }
     }
-    return { content: [content, ...attachmentPages].join("\n"), pages: [content, ...attachmentPages] };
+    const flattenedAttachmentPages = attachmentPages.flatMap((attachment) => attachment.pages);
+    return { content: [content, ...flattenedAttachmentPages].join("\n"), pages: [content, ...flattenedAttachmentPages], attachmentPages };
   }
   if (extension === "pdf") {
     const pdfjs = await import("pdfjs-dist");
     pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
     const pdf = await pdfjs.getDocument({ data: new Uint8Array(buffer) }).promise;
     const pages: string[] = [];
+    const visualPages: string[] = [];
     for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
       const page = await pdf.getPage(pageNumber);
       const text = await page.getTextContent();
+      // Preserve the original flat page text for Single View.
       pages.push(text.items.map((item) => ("str" in item ? item.str : "")).join(" "));
+
+      // Keep a second, visually ordered representation for Multiple View.
+      // SUN HOTEL C/IN LIST rows depend on their original table layout.
+      const positionedItems = text.items
+        .filter((item): item is typeof item & { str: string; transform: number[] } =>
+          "str" in item && "transform" in item && Boolean(item.str?.trim()))
+        .map((item) => ({
+          text: item.str.trim(),
+          x: item.transform[4],
+          y: item.transform[5],
+        }));
+      const visualRows: { y: number; cells: { x: number; text: string }[] }[] = [];
+      for (const item of positionedItems) {
+        let row = visualRows.find((candidate) => Math.abs(candidate.y - item.y) <= 2);
+        if (!row) {
+          row = { y: item.y, cells: [] };
+          visualRows.push(row);
+        }
+        row.cells.push({ x: item.x, text: item.text });
+      }
+      visualPages.push(visualRows
+        .sort((a, b) => b.y - a.y)
+        .map((row) => row.cells.sort((a, b) => a.x - b.x).map((cell) => cell.text).join(" "))
+        .join("\n"));
     }
-    return { content: pages.join("\n"), pages };
+    return { content: pages.join("\n"), pages, visualPages };
   }
   return { content: "", pages: [""] };
 }
@@ -305,6 +472,138 @@ function titleCaseName(value: string) {
     (_match, separator: string, letter: string) => separator + letter.toLocaleUpperCase());
 }
 
+function htmlToPlainText(value: string | Uint8Array | ArrayBuffer) {
+  let html = "";
+  if (typeof value === "string") html = value;
+  else {
+    const bytes = value instanceof Uint8Array ? value : new Uint8Array(value);
+    try { html = new TextDecoder("utf-8").decode(bytes); }
+    catch { html = new TextDecoder("windows-1252").decode(bytes); }
+  }
+  if (!html.trim()) return "";
+  if (typeof DOMParser !== "undefined") {
+    const document = new DOMParser().parseFromString(html, "text/html");
+    document.querySelectorAll("script,style,head").forEach((node) => node.remove());
+    document.querySelectorAll("br").forEach((node) => node.replaceWith("\n"));
+    document.querySelectorAll("tr").forEach((node) => node.append("\n"));
+    document.querySelectorAll("td,th").forEach((node) => node.append(" | "));
+    return (document.body.textContent || "").replace(/\u00a0/g, " ").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  }
+  return html.replace(/<\/(?:tr|p|div|li|br)>/gi, "\n")
+    .replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&")
+    .replace(/\s+/g, " ").trim();
+}
+
+function rtfToPlainText(value: string) {
+  let text = value
+    .replace(/\\'[0-9a-f]{2}/gi, (token) => {
+      const byte = Number.parseInt(token.slice(2), 16);
+      return new TextDecoder("windows-1252").decode(new Uint8Array([byte]));
+    })
+    .replace(/\\u(-?\d+)\??/g, (_match, raw) => String.fromCharCode((Number(raw) + 65536) % 65536))
+    .replace(/\\(?:par|line)\b\s?/gi, "\n")
+    .replace(/\\tab\b\s?/gi, "\t")
+    .replace(/\\(?:cell|row)\b\s?/gi, " | ")
+    .replace(/\\[a-zA-Z]+-?\d* ?/g, " ")
+    .replace(/\\[^a-zA-Z]/g, " ")
+    .replace(/[{}]/g, " ");
+  return text.replace(/[ \t]+/g, " ").replace(/ *\n */g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function extractW2mPeople(text: string, searchTerm: string) {
+  // W2M MSG bodies may contain HTML tables or text with LZFu/binary noise.
+  // Normalize the visible text while retaining row and bullet boundaries.
+  const clean = text
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>|<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<\/(?:tr|li|p|div|table|h[1-6])\s*>/gi, "\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;|&#160;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/\r/g, "\n")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, " ")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n[ \t]+/g, "\n");
+
+  const passengersStart = clean.search(/\bPassengers?\s*:/i);
+  const hasPassengersSection = passengersStart >= 0;
+  const section = hasPassengersSection ? clean.slice(passengersStart) : "";
+  const sectionEnd = section.search(
+    /\b(?:Special\s+remarks?|W2M\s+remarks?|Remarks?|Number\s+of\s+Adults?\s*\/\s*Childs?\s*\/\s*Bab(?:y|ies)|Booking\s+Summary|Payment\s+Details|Accommodation|Board)\s*:?/i,
+  );
+  const passengerText = hasPassengersSection
+    ? (sectionEnd > 0 ? section.slice(0, sectionEnd) : section)
+    : "";
+  // Per the W2M format, the summary-table fallback is used only when the
+  // Passengers section is absent; never search hotel remarks for guest names.
+  const fallbackStart = clean.search(/\bBooking\s+Summary\b/i);
+  const fallbackText = !hasPassengersSection
+    ? clean.slice(fallbackStart >= 0 ? fallbackStart : 0)
+    : "";
+  const sourceText = hasPassengersSection ? passengerText : fallbackText;
+
+  const people: { name: string; dob: string }[] = [];
+  const add = (name: string, detail = "") => {
+    const normalizedName = name.replace(/\s+/g, " ").replace(/^[*•\-\s]+|[|,;\s]+$/g, "").trim();
+    if (!normalizedName || normalizedName.split(/\s+/).length < 2) return;
+    people.push({ name: titleCaseName(normalizedName), dob: detail.trim() });
+  };
+
+  if (hasPassengersSection) {
+    // Passenger rows: "* Full Name (Age: 21)", DOB, or a bare date.
+    const bulletPattern = /(?:^|\n|\s)[*•]\s*([\p{L}\p{M}][\p{L}\p{M}'’.-]*(?:\s+[\p{L}\p{M}][\p{L}\p{M}'’.-]*){1,7})\s*(?:\(\s*(?:Age\s*:\s*(\d{1,3})|(?:DOB|Birth\s*date|Date\s*of\s*birth)\s*:\s*(\d{1,2}[./-]\d{1,2}[./-]\d{2,4}))\s*\)|[-|]\s*(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})|\(\s*(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})\s*\))?/giu;
+    for (const match of passengerText.matchAll(bulletPattern)) {
+      add(match[1], match[2] ? "(Age: " + match[2] + ")" : match[3] || match[4] || "");
+    }
+
+    const unbulletedPattern = /(?:^|\n)\s*([\p{L}\p{M}][\p{L}\p{M}'’.-]*(?:\s+[\p{L}\p{M}][\p{L}\p{M}'’.-]*){1,7})\s*(?:\(\s*(?:Age\s*:\s*(\d{1,3})|(?:DOB|Birth\s*date|Date\s*of\s*birth)\s*:\s*(\d{1,2}[./-]\d{1,2}[./-]\d{2,4}))\s*\)|[-|]\s*(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})|\(\s*(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})\s*\))/giu;
+    if (!people.length) {
+      for (const match of passengerText.matchAll(unbulletedPattern)) {
+        add(match[1], match[2] ? "(Age: " + match[2] + ")" : match[3] || match[4] || "");
+      }
+    }
+  }
+
+  // Fallback table: separate Passenger Name / Passenger Last Name columns.
+  const lines = sourceText.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  const headerIndex = lines.findIndex((line) =>
+    /Passenger\s+Name/i.test(line) && /Passenger\s+Last\s+Name/i.test(line),
+  );
+  if (headerIndex >= 0) {
+    const header = lines[headerIndex].split(/\s*\|\s*|\t+|\s{2,}/).map(normalize);
+    const firstIndex = header.findIndex((cell) => /passenger name|first name|given name/.test(cell));
+    const lastIndex = header.findIndex((cell) => /passenger last name|last name|surname/.test(cell));
+    const ageIndex = header.findIndex((cell) => /^age$/.test(cell));
+    const dobIndex = header.findIndex((cell) => /birth|dob|date of birth/.test(cell));
+    for (const line of lines.slice(headerIndex + 1)) {
+      if (/^(number of adults|special remarks|w2m remarks|remarks|booking summary|payment details)/i.test(line)) break;
+      const cells = line.split(/\s*\|\s*|\t+|\s{2,}/).map((cell) => cell.trim());
+      if (firstIndex < 0 || lastIndex < 0 || !cells[firstIndex] || !cells[lastIndex]) continue;
+      const dob = dobIndex >= 0 ? cells[dobIndex] || "" : "";
+      const age = ageIndex >= 0 ? cells[ageIndex] || "" : "";
+      add(cells[firstIndex] + " " + cells[lastIndex], dob.match(/\d{1,2}[./-]\d{1,2}[./-]\d{2,4}/)?.[0]
+        || (age.match(/^\d{1,3}$/) ? "(Age: " + age + ")" : ""));
+    }
+  }
+
+  if (!people.length && !hasPassengersSection) {
+    // Summary fallback only: accept the explicit first/last-name labels.
+    const rowPattern = /(?:Passenger\s+Name|First\s+Name)\s*:?\s*([\p{L}\p{M}'’.-]+)[\s|,]+(?:Passenger\s+Last\s+Name|Last\s+Name|Surname)\s*:?\s*([\p{L}\p{M}'’.-]+)(?:[\s|,]+(?:Age\s*:?\s*(\d{1,3})|(?:DOB|Birth\s*date|Date\s*of\s*birth)\s*:?\s*(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})))?/giu;
+    for (const match of fallbackText.matchAll(rowPattern)) {
+      add(match[1] + " " + match[2], match[3] ? "(Age: " + match[3] + ")" : match[4] || "");
+    }
+  }
+
+  // A W2M email represents one booking and its Passengers block is the
+  // authoritative guest list. The search may be a hotel arrival-list name
+  // in "SURNAME, GIVEN, TITLE" order, which does not match W2M's full-name
+  // order; once the MSG itself is selected, return all passengers in it.
+  return people;
+}
 function titleCaseAnexName(value: string) {
   // Anex prints guest names as SURNAME GIVEN-NAME; show them as Given-name Surname.
   const parts = value.trim().split(/\s+/).filter(Boolean);
@@ -348,7 +647,177 @@ function extractEaglePeople(text: string) {
   return names.map((name, index) => ({ name, dob: dates[index] }));
 }
 
-function extractPeople(text: string, searchTerm: string, company = "") {
+function extractTravelWaysPeople(text: string, searchTerm: string) {
+  // Travel Ways EBD reports repeat the booking voucher only on the first
+  // guest row. Attach subsequent titled DOB rows to that same booking.
+  type BookingGroup = { voucher: string; people: { name: string; dob: string }[] };
+  const groups: BookingGroup[] = [];
+  let current: BookingGroup | null = null;
+
+  const parseGuestRow = (line: string) => {
+    const match = line.match(
+      /^\s*(?:MR|MRS|MS|MISS|MSTR|MASTER|CHD|CHILD|INF)\.?\s+(.+?)\s+(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})(?=\s|$)/i,
+    );
+    if (!match) return null;
+    const name = match[1].replace(/\s+/g, " ").trim();
+    if (!name || /^(?:surname,? name|total pax|total room)$/i.test(name)) return null;
+    return { name: titleCaseName(name), dob: match[2].replace(/[/-]/g, ".") };
+  };
+
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    const bookingStart = line.match(/^([A-Z][A-Z0-9_-]{1,12})\s+([A-Z0-9-]{5,})\s+\d+\s+(.+)$/i);
+    if (bookingStart) {
+      if (current?.people.length) groups.push(current);
+      current = { voucher: bookingStart[2], people: [] };
+      const firstGuest = parseGuestRow(bookingStart[3]);
+      if (firstGuest) current.people.push(firstGuest);
+      continue;
+    }
+
+    if (!current) continue;
+    const continuationGuest = parseGuestRow(line);
+    if (continuationGuest) {
+      current.people.push(continuationGuest);
+      continue;
+    }
+
+    if (/^(?:\d{1,2}[./-]\d{1,2}[./-]\d{4}\s+Totals|Total\s+(?:Pax|Room)\s*:|NOTE:)/i.test(line)) {
+      if (current.people.length) groups.push(current);
+      current = null;
+    }
+  }
+  if (current?.people.length) groups.push(current);
+
+  const query = normalize(searchTerm);
+  if (!query) return groups.flatMap((group) => group.people);
+  const compactQuery = query.replace(/\s+/g, "");
+  const nameTokens = query.split(/\s+/).filter(
+    (token) => token.length > 1 && !/^(?:mr|mrs|ms|miss|mstr|master|chd|child|inf)$/i.test(token),
+  );
+  const matchingGroups = groups.filter((group) => {
+    const voucher = normalize(group.voucher).replace(/\s+/g, "");
+    if (compactQuery === voucher) return true;
+    return group.people.some((person) => {
+      const name = normalize(person.name);
+      return name.includes(query) || (nameTokens.length > 0 && nameTokens.every((token) => name.includes(token)));
+    });
+  });
+  return matchingGroups.flatMap((group) => group.people);
+}
+
+function isPlanetIndexedFile(file: Pick<IndexedFile, "company" | "name" | "path" | "content" | "pages" | "attachmentPages"> | null | undefined) {
+  if (!file) return false;
+  const company = normalize(file.company);
+  const searchable = [file.name, file.path, file.content, ...file.pages,
+    ...(file.attachmentPages || []).flatMap((attachment) => [attachment.name, ...attachment.pages])].join(" ");
+  return company === "planet" || /\bplanet\s+tours?\b/i.test(searchable)
+    || (/\bHOTEL\s+(?:RESERVATION\s+FORM|C\/IN\s+LIST)\b/i.test(searchable)
+      && /\b(?:RAINBOW|RAIN)\s+\d{5,10}\s+\d+\s+(?:MR|MRS|MS|MISS|CHD)\b/i.test(searchable));
+}
+
+function extractPlanetPeople(pages: string[], searchTerm: string) {
+  type PlanetBooking = { voucher: string; people: MultipleGuest[] };
+  const groups: PlanetBooking[] = [];
+  const byVoucher = new Map<string, PlanetBooking>();
+  let current: PlanetBooking | null = null;
+  let lastPerson: MultipleGuest | null = null;
+
+  const addGuest = (raw: string, group: PlanetBooking): MultipleGuest | null => {
+    const guest = raw.match(/\b(MR|MRS|MS|MISS|MSTR|MASTER|CHD|CHILD|INF)\.?\s+(.+?)(?=\s+\d{1,2}[./-]\d{1,2}[./-]\d{4}\b|\s+(?:ARR\b|ENT\d|SINGLE\s+ROOM|DOUBLE\s+ROOM|TRIPLE\s+ROOM|QUAD\s+ROOM)\b|$)/i);
+    if (!guest) return null;
+    const name = guest[2].replace(/\s+/g, " ").replace(/[,.]+$/, "").trim();
+    if (!name || /^(?:SURNAME,? NAME|TOTAL PAX|TOTAL ROOM)$/i.test(name)) return null;
+    const dob = raw.match(/\b(\d{1,2}[./-]\d{1,2}[./-]\d{4})\b/)?.[1] || "";
+    const person = { name: titleCaseName(name), dob: dob.replace(/[/-]/g, ".") };
+    const existing = group.people.find((item) => normalize(item.name) === normalize(person.name) && item.dob === person.dob);
+    if (existing) return existing;
+    group.people.push(person);
+    return person;
+  };
+
+  for (const rawLine of pages.join("\n").split(/\r?\n/)) {
+    const line = rawLine.replace(/\s+/g, " ").trim();
+    if (!line) continue;
+    const start = line.match(/^.{0,35}?\b(\d{5,10})\s+\d+\s+((?:MR|MRS|MS|MISS|MSTR|MASTER|CHD|CHILD|INF)\.?\s+.+)$/i);
+    if (start) {
+      const voucher = start[1];
+      current = byVoucher.get(voucher) || { voucher, people: [] };
+      if (!byVoucher.has(voucher)) {
+        byVoucher.set(voucher, current);
+        groups.push(current);
+      }
+      lastPerson = addGuest(start[2], current);
+      continue;
+    }
+    if (/^(?:NOTE:|TOTAL\s+PAX\b|TOTAL\s+ROOM\b|LONG\s+BEACH\s+HOTEL\s+TOTALS?)/i.test(line)) {
+      current = null;
+      lastPerson = null;
+      continue;
+    }
+    if (current && /^(?:MR|MRS|MS|MISS|MSTR|MASTER|CHD|CHILD|INF)\.?\s+/i.test(line)) {
+      lastPerson = addGuest(line, current);
+    } else if (current && lastPerson && line.length >= 4
+      && /^[\p{L}][\p{L}'’.-]{2,40}$/u.test(line)
+      && line === line.toLocaleUpperCase()) {
+      // Some Planet PDFs wrap a long surname onto its own visual line.
+      lastPerson.name = titleCaseName(lastPerson.name + " " + line);
+    }
+  }
+
+  const query = normalize(searchTerm);
+  if (!query) return groups.flatMap((group) => group.people);
+  const compactQuery = query.replace(/\s+/g, "");
+  if (/^\d{5,10}$/.test(compactQuery)) {
+    const exact = groups.find((group) => group.voucher === compactQuery);
+    if (exact) return exact.people;
+  }
+  const queryTokens = query.split(/\s+/).filter((token) =>
+    token.length >= 3 && !/^(?:mr|mrs|ms|miss|mstr|master|chd|child|inf|adult|adt)$/i.test(token),
+  );
+  const matchingGroups = groups.filter((group) => {
+    const nameTokens = normalize(group.people.map((person) => person.name).join(" ")).split(/\s+/);
+    if (!queryTokens.length) return false;
+    return queryTokens.length === 1
+      ? nameTokens.includes(queryTokens[0])
+      : queryTokens.every((token) => nameTokens.includes(token));
+  });
+  return matchingGroups.flatMap((group) => group.people);
+}
+
+function extractPeople(text: string, searchTerm: string, company = "", enableSunCheckInList = false, preserveDuplicateNames = false) {
+  company = detectVoucherCompany(text, company);
+
+  // MTS / OTS Guest Voucher: traveller rows may include a title, omit it,
+  // or use Dutch titles such as "de heer". Examples:
+  // 1. Herr Spiegel Kevin (19.Jul.1997), 1. Solina Natalia (30),
+  // 3. de heer Nabben Laurence (15.Jul.1969).
+  if (/\b(?:Voucher\s+)?Reference\s+No\.?\s*:/i.test(text) && /\bTravellers?\s*:/i.test(text)) {
+    const travellerSection = text.match(/\bTravellers?\s*:\s*\d+\s+persons?\s*([\s\S]*?)(?=\bDates\s*:|$)/i)?.[1] || "";
+    const mtsRow = /(?:^|\n)\s*\d{1,2}\s*[.)-]\s*([^\r\n(]+?)\s*\(\s*(\d{1,2}\s*[.\/-]\s*[A-Za-z]{3,9}\s*[.\/-]\s*\d{4}|\d{1,2}\s*[.\/-]\s*\d{1,2}\s*[.\/-]\s*\d{2,4}|\d{1,3})\s*\)/gim;
+    const mtsPeople = Array.from(travellerSection.matchAll(mtsRow), (match) => {
+      const value = match[2].replace(/\s+/g, "");
+      const isAge = /^\d{1,3}$/.test(value);
+      const name = match[1].trim()
+        .replace(/^(?:de\s+heer|mevrouw|herr|frau|mr|mrs|ms|miss|mstr|master)\.?\s+/i, "")
+        .trim();
+      if (!name) return null;
+      return {
+        name: titleCaseName(name.replace(/\s+/g, " ")),
+        dob: isAge ? "(Age: " + value + ")" : value.replace(/[\/-]/g, "."),
+      };
+    }).filter((person): person is MultipleGuest => Boolean(person));
+    if (mtsPeople.length) return mtsPeople;
+  }
+  const isTravelWaysReport = /travel\s*ways/i.test(company)
+    || (/HOTEL\s+CONTRACT\s+EBD\s+LIST/i.test(text)
+      && /\bOperator\b[\s\S]{0,250}\bVoucher\b/i.test(text));
+  if (isTravelWaysReport) {
+    const travelWaysPeople = extractTravelWaysPeople(text, searchTerm);
+    if (travelWaysPeople.length) return travelWaysPeople;
+  }
   // Eagle Travel rooming lists are sent as Outlook email tables with surname/given-name
   // entries in the Names column and matching two-digit DOBs in the Age column.
   const hasEagleRoomingTable = /\bNames\b[\s\S]{0,200}\bAge\b[\s\S]{0,100}\bACC\b/i.test(text);
@@ -456,6 +925,68 @@ function extractPeople(text: string, searchTerm: string, company = "") {
     );
   }
 
+  // SUN International Outlook attachment: HOTEL C/IN LIST.
+  // Voucher identifies a booking; following titled rows without a repeated
+  // Voucher belong to it until another booking code appears.
+  const isSunCheckInList = /\bHOTEL\s+C\/IN\s+LIST\b/i.test(text)
+    && /\bVoucher\b/i.test(text)
+    && /\bSurname,\s*Name\b/i.test(text)
+    && /\bAge\/B\.Date\b/i.test(text);
+  if (isSunCheckInList && enableSunCheckInList) {
+    type SunCheckInGroup = { voucher: string; people: { name: string; dob: string }[] };
+    const groups: SunCheckInGroup[] = [];
+    const groupsByVoucher = new Map<string, SunCheckInGroup>();
+    let current: SunCheckInGroup | null = null;
+    const titlePattern = /\b(MR|MRS|MS|MISS|MSTR|MASTER|CHD|CHILD|INF)\.?\s+(.+?)(?=\s+ARR\+?\b|\s+(?:SINGLE|DOUBLE|TRIPLE|QUAD)\s+ROOM\b|$)/i;
+
+    for (const rawLine of text.split(/\r?\n/)) {
+      const line = rawLine.replace(/\s+/g, " ").trim();
+      if (!line) continue;
+      const guestMatch = titlePattern.exec(line);
+      if (!guestMatch) continue;
+      const beforeGuest = line.slice(0, guestMatch.index);
+      const voucherMatch = beforeGuest.match(/\b([A-Z0-9]{5,10})\s+\d+\s*$/i)
+        || beforeGuest.match(/\b([A-Z0-9]{5,10})\b/i);
+      if (voucherMatch) {
+        const voucher = voucherMatch[1].toUpperCase();
+        current = groupsByVoucher.get(voucher) || { voucher, people: [] };
+        if (!groupsByVoucher.has(voucher)) { groupsByVoucher.set(voucher, current); groups.push(current); }
+      }
+      if (!current) continue;
+      // Only read DOB from the guest cell before the ARR/status column.
+      // Dates later on the line are arrival/departure dates and must not be used as DOB.
+      const guestCell = guestMatch[2].replace(/\s+(?:ARR\+?|NEW|CHANGED)\b.*$/i, "")
+        .replace(/\s+(?:SINGLE|DOUBLE|TRIPLE|QUAD)\s+ROOM\b.*$/i, "").trim();
+      const dobMatch = guestCell.match(/\b(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})\b/);
+      const nameBeforeDob = dobMatch
+        ? guestCell.slice(0, dobMatch.index)
+        : guestCell.replace(/\s+-\s*$/, "");
+      // Age may share the same guest cell with the name and DOB (e.g.
+      // "VIVIANA SEYBOLD 36 13.02.1989"); do not append it to the name.
+      const rawName = nameBeforeDob.replace(/\s+\d{1,3}\s*\/?\s*$/, "")
+        .replace(/\s+/g, " ").replace(/^[,\s]+|[,\s]+$/g, "").replace(/,/g, " ").trim();
+      if (!rawName || /^(?:SURNAME NAME|NAME|AGE)$/i.test(rawName)) continue;
+      current.people.push({ name: titleCaseName(rawName), dob: dobMatch ? dobMatch[1].replace(/[/-]/g, ".") : "" });
+    }
+
+    const normalizedQuery = normalize(searchTerm);
+    if (!normalizedQuery) return groups.flatMap((group) => group.people);
+    const compactQuery = normalizedQuery.replace(/\s+/g, "");
+    if (/^[a-z0-9]{5,10}$/i.test(compactQuery)) {
+      const match = groups.find((group) => group.voucher.toLowerCase() === compactQuery.toLowerCase());
+      return match?.people || [];
+    }
+    const searchTokens = getSunSearchTokens(normalizedQuery);
+    const matchingGroups = groups.filter((group) => group.people.some((person) => {
+      const name = normalize(person.name);
+      return name.includes(normalizedQuery)
+        || (searchTokens.length > 0 && searchTokens.every((token) =>
+          name.split(/\s+/).some((part) => part.includes(token)),
+        ));
+    }));
+    return matchingGroups.flatMap((group) => group.people);
+  }
+
   const clean = text.replace(/[\t|]+/g, " ").replace(/\s+/g, " ").trim();
 
   // Red Sea Tours Outlook bookings: each booking block contains guest names
@@ -485,42 +1016,18 @@ function extractPeople(text: string, searchTerm: string, company = "") {
     }
   }
 
-  // W2M booking emails: guest rows appear in the "Passengers" section as
-  // "* Full Name (Age: NN)". Use the full passenger list so every guest is
-  // returned, including middle names and repeated surname tokens.
+  // W2M Outlook bookings are parsed from the fully decoded message body.
   const isW2mBooking = /^w2m$/i.test(company.trim())
+    || /noreply@w2m\.com|world\s*2\s*meet|world2meet/i.test(clean)
     || (/\bBooking\s+Code\b/i.test(clean)
-      && /\bPassenger\s+Name\b/i.test(clean)
-      && /\bPassenger\s+Last\s+Name\b/i.test(clean)
-      && /\bWorld\s+2\s+Meet\b/i.test(clean));
+      && ((/\bPassenger\s+Name\b/i.test(clean)
+        && /\bPassenger\s+Last\s+Name\b/i.test(clean))
+        || /\bPassengers?\s*:/i.test(clean)));
   if (isW2mBooking) {
-    const passengersStart = clean.search(/\bPassengers\s*:/i);
-    const passengersEndMatch = passengersStart >= 0
-      ? clean.slice(passengersStart).match(/\bNumber\s+of\s+Adults\s*\/\s*Childs\s*\/\s*Babies\b/i)
-      : null;
-    const passengersSection = passengersStart >= 0
-      ? clean.slice(passengersStart + "Passengers:".length,
-          passengersEndMatch
-            ? passengersStart + "Passengers:".length + passengersEndMatch.index!
-            : clean.length)
-      : "";
-    const w2mRowPattern = /(?:^|\s)\*\s*([\p{L}\p{M}][\p{L}\p{M}'’.-]*(?:\s+[\p{L}\p{M}][\p{L}\p{M}'’.-]*){1,7})\s*\(\s*Age\s*:\s*\d{1,3}\s*\)/giu;
-    const w2mPeople = Array.from(passengersSection.matchAll(w2mRowPattern), (match) => ({
-      name: titleCaseName(match[1].trim()),
-      dob: "",
-    }));
-    if (w2mPeople.length) {
-      const normalizedSearch = normalize(searchTerm);
-      const matchesBooking = !normalizedSearch || w2mPeople.some((person) => {
-        const nameParts = normalize(person.name).split(/\s+/);
-        const queryParts = normalizedSearch.split(/\s+/).filter(Boolean);
-        return normalizedSearch === normalize(person.name)
-          || (queryParts.length > 0 && queryParts.every((token) =>
-            nameParts.some((part) => part.includes(token)),
-          ));
-      });
-      return matchesBooking ? w2mPeople : [];
-    }
+    // Never fall through to generic name guessing for a W2M booking.
+    // If its passenger section cannot be parsed, returning no names is safer
+    // than treating promotional/special-remarks text as guessed names.
+    return extractW2mPeople(text, searchTerm);
   }
 
   // TUI Destimo voucher: the PDF text extractor may emit the room columns
@@ -573,31 +1080,75 @@ function extractPeople(text: string, searchTerm: string, company = "") {
     if (tezPeople.length) return tezPeople;
   }
 
-  // SUN International / Hotel2Sejour voucher:
-  // Passenger rows follow the "Passenger Informations" table header.
+  // FUN&SUN / FUN voucher:
+  // Passenger rows use the columns Title, Surname/Name, Age, Birthdate,
+  // Arrival, Hour, Departure, Hour, Passport. The flight and passport
+  // columns follow the DOB, so the generic titled-name parser cannot
+  // safely identify the end of a guest row. Anchor each guest on its DOB.
+  const isFunSunVoucher = /(?:FUN\s*&\s*SUN|FUN\s+SUN|FUN\s+SUN\s+TRAVEL|EX\s+TUI\s+RUSSIA)/i.test(clean)
+    || /^fun(?:\s*\&?\s*sun)?$/i.test(company.trim());
+  if (isFunSunVoucher && /\bPassenger\s+Informations\b/i.test(clean)
+    && /\bBirthdate\b/i.test(clean)) {
+    const passengerStart = clean.search(/\bPassenger\s+Informations\b/i);
+    const passengerSection = clean.slice(passengerStart)
+      .replace(/^Passenger\s+Informations\b/i, "")
+      .split(/\b(?:Agency\s+Note|Hotel\s+Notes|Agency\s+Name|Agency\s+User|Sejour\s+Hotel\s+Name)\b/i)[0];
+    const funSunRowPattern = /(?:^|\s)(?:MR|MRS|MS|MISS|MSTR|MASTER|CHD|CHILD|INF|ADT)\.?\s+([\p{L}][\p{L}\p{M}'’.-]*(?:\s+[\p{L}][\p{L}\p{M}'’.-]*){1,3})\s*(?:-\s*)?(\d{1,2}[./-]\d{1,2}[./-]\d{4})\b/giu;
+    const funSunPeople = Array.from(passengerSection.matchAll(funSunRowPattern), (match) => ({
+      name: titleCaseName(match[1].replace(/[,]+/g, " ").replace(/\s+/g, " ").trim()),
+      dob: match[2].replace(/[/-]/g, "."),
+    })).filter((person) => person.name && !/^(?:passenger informations|surname name|name age|age)$/i.test(person.name));
+
+    if (funSunPeople.length) {
+      const normalizedSearch = normalize(searchTerm);
+      const compactSearch = normalizedSearch.replace(/\s+/g, "");
+      // Room/confirmation searches identify the voucher in Multiple View;
+      // return every passenger in that voucher. A name search must also
+      // return the complete passenger group once any guest matches.
+      const matchesVoucher = !normalizedSearch
+        || /^\d{3,9}$/.test(compactSearch)
+        || funSunPeople.some((person) => {
+          const nameParts = normalize(person.name).split(/\s+/).filter(Boolean);
+          const queryParts = getSunSearchTokens(normalizedSearch);
+          return normalize(person.name).includes(normalizedSearch)
+            || (queryParts.length > 0 && queryParts.every((token) =>
+              nameParts.some((part) => part.includes(token)),
+            ));
+        });
+      return matchesVoucher ? funSunPeople : [];
+    }
+  }
+
+  // SUN International / Sunbug / Hotel2Sejour passenger table.
+  // The table headings are sufficient to identify this format even when the
+  // supplier/company heading or the "Passenger Informations" label is absent
+  // from PDF text extraction.
   const sunSectionIndex = clean.search(/passenger\s+informations/i);
-  // Some PDF text extractors omit the voucher/company heading or place it on
-  // another page. Identify the passenger table by its own column headings.
   const hasSunPassengerColumns = /surname\s*,?\s*name/i.test(clean)
-    && /birthdate/i.test(clean)
-    && /\btitle\b/i.test(clean);
-  const isSunPassengerTable = sunSectionIndex >= 0 && hasSunPassengerColumns;
-  if (isSunPassengerTable) {
-    const passengerSection = clean.slice(sunSectionIndex)
-      .split(/\b(?:Agency\s+Note|Hotel\s+Notes|Agency\s+Name|Agency)\b/i)[0];
-    const sunRowPattern = /\b(?:MRS|MR|MS|MISS|MSTR|CHD|INF|ADT|ADULT|CHILD)\s+([A-Z][A-Z\s,.'’\-]{1,65}?)\s+(-|\d{1,3})\s+(-|\d{1,2}[./-]\d{1,2}[./-]\d{2,4})(?=\s|$)/gi;
+    && /\bbirthdate\b/i.test(clean)
+    && /\btitle\b/i.test(clean)
+    && /\bage\b/i.test(clean);
+  if (hasSunPassengerColumns) {
+    const passengerSection = (sunSectionIndex >= 0 ? clean.slice(sunSectionIndex) : clean)
+      .split(/\b(?:Agency\s+Note|Hotel\s+Notes|Agency\s+Name|Agency\s+User|Sejour\s+Hotel\s+Name)\b/i)[0];
+    // Row order: Title, Surname/Name, Age, Birthdate. A dash is a real empty
+    // field, not a reason to drop the passenger or infer a date.
+    const sunRowPattern = /\b(?:MRS|MR|MS|MISS|MSTR|MASTER|CHD|CHILD|INF|ADT|ADULT)\.?\s+([\p{L}][\p{L}\p{M}\s,.'’\-]{1,65}?)\s+(-|\d{1,3})\s+(-|\d{1,2}[./-]\d{1,2}[./-]\d{2,4})(?=\s|$)/giu;
     const sunPeople = Array.from(passengerSection.matchAll(sunRowPattern), (match) => ({
-      name: titleCaseName(match[1].trim()),
-      dob: match[3] === "-" ? "لم يُعثر عليه" : match[3].replace(/[.-]/g, "/"),
-    }));
+      name: titleCaseName(match[1].replace(/\s+/g, " ").replace(/^[,\s]+|[,\s]+$/g, "").trim()),
+      // Empty DOB stays empty; the SUN card renderer displays the required
+      // trailing hyphen without inventing a date.
+      dob: match[3] === "-" ? "" : match[3].replace(/[.-]/g, "/"),
+    })).filter((person) => person.name && !/^(?:surname name|name|age)$/i.test(person.name));
     if (sunPeople.length) {
       const normalizedSearch = normalize(searchTerm);
+      const searchTokens = getSunSearchTokens(normalizedSearch);
       const matchesVoucher = !normalizedSearch
-        || /^\d{7,8}$/.test(normalizedSearch.replace(/\s+/g, ""))
+        || /^\d{5,12}$/.test(normalizedSearch.replace(/\s+/g, ""))
         || sunPeople.some((person) => normalize(person.name).includes(normalizedSearch)
-          || normalizedSearch.split(/\s+/).every((token) =>
+          || (searchTokens.length > 0 && searchTokens.every((token) =>
             normalize(person.name).split(/\s+/).some((part) => part.includes(token)),
-          ));
+          )));
       return matchesVoucher ? sunPeople : [];
     }
   }
@@ -763,15 +1314,44 @@ function extractPeople(text: string, searchTerm: string, company = "") {
     if (people.length) return people;
   }
 
+  // Generic hotel rooming-list attachment fallback.
+  // Some supplier PDFs place the guest name and DOB in separate visual rows.
+  // Extract the titled name independently; attach a DOB only when it follows
+  // that same name before another guest/title or booking field begins.
+  const titledAttachmentPattern = /\\b(MR|MRS|MS|MISS|MSTR|MASTER|CHD|CHLD)\\.?\\s+([\\p{L}][\\p{L}’'.,-]*(?:\\s+[\\p{L}][\\p{L}’'.,-]*){1,4}?)(?:\\s+(\\d{1,2}[./-]\\d{1,2}[./-]\\d{4})\\b)?(?=\\s+(?:MR|MRS|MS|MISS|MSTR|MASTER|CHD|CHLD)\\b|\\s+\\d{1,2}:\\d{2}\\b|\\s+[A-Z]{1,3}\\d{4,}\\b|\\s+passport\\b|$)/giu;
+  const titledAttachmentPeople = Array.from(clean.matchAll(titledAttachmentPattern), (match) => ({
+    name: titleCaseName(match[2].replace(/[,]+/g, " ").trim()),
+    dob: match[3] ? match[3].replace(/[/-]/g, ".") : "",
+  })).filter((person) => person.name && !/^(?:DOUBLE ROOM|STANDARD|PREMIUM)$/i.test(person.name));
+  if (titledAttachmentPeople.length) {
+    const normalizedSearch = normalize(searchTerm);
+    if (!normalizedSearch || /^\\d{3,9}$/.test(normalizedSearch.replace(/\\s+/g, ""))) {
+      return titledAttachmentPeople;
+    }
+    const tokens = normalizedSearch.split(/\\s+/)
+      .filter((token) => !/^(?:mr|mrs|ms|miss|mstr|master|chd|chld)$/.test(token));
+    const matchingPeople = titledAttachmentPeople.filter((person) => {
+      const parts = normalize(person.name).split(/\\s+/);
+      return normalize(person.name).includes(normalizedSearch)
+        || (tokens.length > 0 && tokens.every((token) => parts.some((part) => part.includes(token))));
+    });
+    if (matchingPeople.length) return matchingPeople;
+  }
+
   const datePattern = "(?:\\d{1,2}[\\/-]\\d{1,2}[\\/-]\\d{2,4}|\\d{4}[\\/-]\\d{1,2}[\\/-]\\d{1,2}|\\d{1,2}\\s+[A-Za-z]{3,9}\\s+\\d{4})";
   const dates: string[] = [];
   const dateRegex = new RegExp("(?:date\\s*of\\s*birth|birth\\s*date|dob|d\\.o\\.b\\.?|تاريخ\\s*الميلاد)\\s*[:#-]?\\s*(" + datePattern + ")", "gi");
   for (const match of clean.matchAll(dateRegex)) dates.push(match[1]);
+  const ages: string[] = [];
+  if (preserveDuplicateNames) {
+    const ageRegex = /(?:\bage\b|years?\s*old)\s*[:#-]?\s*(\d{1,3})|\((\d{1,3})\)/gi;
+    for (const match of clean.matchAll(ageRegex)) ages.push(match[1] || match[2]);
+  }
   const names: string[] = [];
   const nameRegex = /(?:guest\s*name|passenger\s*name|full\s*name|name\s*of\s*guest|guest|passenger|الاسم|اسم\s*النزيل)\s*[:#-]?\s*([\p{L}][\p{L}\s'.-]{2,60}?)(?=\s+(?:date\s*of\s*birth|birth\s*date|dob|d\.o\.b\.?|passport|nationality|room|تاريخ\s*الميلاد)\b|[,;|]|$)/giu;
   for (const match of clean.matchAll(nameRegex)) {
     const candidate = match[1].trim();
-    if (candidate && !names.some((name) => normalize(name) === normalize(candidate))) names.push(candidate);
+    if (candidate && (preserveDuplicateNames || !names.some((name) => normalize(name) === normalize(candidate)))) names.push(candidate);
   }
   if (!names.length && searchTerm.trim()) {
     const escaped = searchTerm.trim().replace(/[.*+?^\x24{}()|[\]\\]/g, "\\$&");
@@ -780,21 +1360,601 @@ function extractPeople(text: string, searchTerm: string, company = "") {
   }
   return names.map((name, index) => ({
     name: titleCaseName(name),
-    dob: dates[index] || (dates.length === 1 ? dates[0] : "لم يُعثر عليه"),
+    dob: dates[index] || (dates.length === 1 ? dates[0] : ages[index] ? "(Age: " + ages[index] + ")" : "لم يُعثر عليه"),
   }));
 }
 
+
+type SunIndexedFile = Pick<IndexedFile, "extension" | "pages" | "visualPages" | "content" | "company" | "name" | "path">;
+
+function isAnexIndexedFile(file: Pick<IndexedFile, "company" | "content" | "pages" | "path"> | null | undefined) {
+  if (!file) return false;
+  return /\\banex(?:\\s*tour)?\\b/i.test(file.company)
+    || /\\banex(?:\\s*tour)?\\b/i.test(file.path)
+    || /\\bclients\\s*names\\s*,?\\s*citizenship\\b/i.test(file.content + " " + file.pages.join(" "));
+}
+
+function isW2mIndexedFile(file: Pick<IndexedFile, "company" | "content" | "pages"> | null | undefined) {
+  if (!file) return false;
+  return /^w2m$/i.test(file.company.trim())
+    || /noreply@w2m\.com|world\s*2\s*meet|world2meet/i.test([file.content, ...file.pages].join(" "));
+}
+
+function isMtsIndexedFile(file: Pick<IndexedFile, "company" | "content" | "pages" | "name" | "path"> | null | undefined) {
+  if (!file) return false;
+  const company = normalize(file.company);
+  const searchable = [file.name, file.path, file.content, ...file.pages].join(" ");
+  return company === "mts" || company.startsWith("mts ") || /\bmts\s*globe\b|mtsglobe/i.test(searchable);
+}
+
+function isSunInternationalIndexedFile(file: SunIndexedFile | null | undefined) {
+  if (!file) return false;
+  const company = normalize(file.company);
+  const searchable = [file.name, file.path, file.content, ...file.pages, ...(file.visualPages || [])].join(" ");
+  const isFunSun = isFunSunAlias(file.company)
+    || /FUN\s*&\s*SUN|FUN\s+SUN|FUN\s+AND\s+SUN|EX\s+TUI\s+RUSSIA/i.test(searchable);
+  if (isFunSun) return false;
+  const hasPassengerTable = /passenger\s+informations/i.test(searchable)
+    && /surname\s*,?\s*name/i.test(searchable)
+    && /\bbirthdate\b/i.test(searchable)
+    && /\btitle\b/i.test(searchable)
+    && /\bage\b/i.test(searchable);
+  const hasCheckInList = /\bHOTEL\s+C\/IN\s+LIST\b/i.test(searchable)
+    && /\bVoucher\b/i.test(searchable)
+    && /\bSurname,\s*Name\b/i.test(searchable)
+    && /\bAge\/B\.Date\b/i.test(searchable);
+  return ["sun", "sun international", "sunbug", "sun bug"].includes(company)
+    || /\bSUN\s+INTERNATIONAL\b|\bSUNBUG\b/i.test(searchable)
+    || hasPassengerTable
+    || hasCheckInList;
+}
+
+function isFunSunIndexedFile(file: Pick<IndexedFile, "company" | "content" | "pages" | "name" | "path"> | null | undefined) {
+  if (!file) return false;
+  const searchable = [file.name, file.path, file.content, ...file.pages].join(" ");
+  return isFunSunAlias(file.company)
+    || /FUN\s*&\s*SUN|FUN\s+SUN|FUN\s+AND\s+SUN|EX\s+TUI\s+RUSSIA/i.test(searchable);
+}
+
+function getFunSunFilePriority(file: Pick<IndexedFile, "name" | "extension">) {
+  if (file.extension.toLowerCase() !== "pdf") return 5;
+  const base = file.name.replace(/\\.pdf$/i, "").trim();
+  // Accept AMEND / AMMEND, optional dot/space, and + or - before the suffix.
+  if (/^\\d+[\\s._+-]*am+end$/i.test(base)) return 0;
+  if (/^\\d{5,12}$/.test(base)) return 1;
+  if (/^\\d{5,12}(?:[,_\\s-].+|[+-].+)$/i.test(base)) return 2;
+  if (/^reservations\\s*\\(\\s*\\d+\\s*\\)$/i.test(base)
+    || /^download$/i.test(base)
+    || /^hotel2sejour$/i.test(base)) return 3;
+  return 4;
+}
+
+/**
+ * Parse SUN batch PDFs page-by-page so a name or reservation search returns
+ * only the matching reservation page(s), not passengers from every booking
+ * in Hotel2Sejour / Final / Reservations files. For MSG files, inspect PDF
+ * attachment pages before falling back to the email body.
+ */
+function extractPeopleForMultipleView(
+  file: Pick<IndexedFile, "extension" | "pages" | "visualPages" | "content" | "company" | "name" | "path" | "attachmentPages">,
+  searchTerm: string,
+  enableSunCheckInList = false,
+) {
+  const isMsg = file.extension.toLowerCase() === "msg";
+  const isSun = isSunInternationalIndexedFile(file);
+  const isMts = isMtsIndexedFile(file);
+  if (isPlanetIndexedFile(file)) {
+    const sourcePages = isMsg
+      ? (file.attachmentPages || []).filter((attachment) => /\.pdf$/i.test(attachment.name)).flatMap((attachment) => attachment.pages)
+      : (file.visualPages?.length ? file.visualPages : file.pages);
+    return extractPlanetPeople(sourcePages, searchTerm);
+  }
+
+  // W2M sends the authoritative guest list in the Outlook email body under
+  // "Passengers:". Parse that body directly before generic supplier logic;
+  // do not let promotional text in Special remarks become guessed names.
+  if (isW2mIndexedFile(file)) {
+    const source = isMsg
+      ? (file.pages[0] || file.content || "")
+      : (file.visualPages?.length ? file.visualPages.join("\n") : file.pages.join("\n")) || file.content || "";
+    return extractW2mPeople(source, searchTerm);
+  }
+
+  if (isMts) {
+    const namedVoucherPages = isMsg
+      ? (file.attachmentPages || []).filter((attachment) => /guest\s*voucher/i.test(attachment.name)).flatMap((attachment) => attachment.pages)
+      : [];
+    const sourcePages = isMsg
+      ? namedVoucherPages.filter((page) => page.trim())
+      : /guest\s*voucher/i.test(file.name)
+        ? (file.visualPages?.length ? file.visualPages : file.pages).filter((page) => page.trim())
+        : [];
+    const compactQuery = normalize(searchTerm).replace(/\s+/g, "");
+    const queryIsNumeric = /^\d{5,12}$/.test(compactQuery);
+    const filenameMatchesBooking = queryIsNumeric
+      && normalize(file.name).replace(/\s+/g, "").replace(/\.msg$|\.pdf$/i, "") === compactQuery;
+    const hasBookingReference = (page: string) => {
+      const references = Array.from(page.matchAll(
+        /\b(?:booking|reservation|confirmation)\s*(?:number|no\.?|reference|ref\.?|#)?\s*[:#-]?\s*([A-Z0-9-]{5,})/gi,
+      ), (match) => normalize(match[1]).replace(/\s+/g, ""));
+      return references.includes(compactQuery);
+    };
+    let matchingPages = sourcePages.filter((page) => {
+      if (!searchTerm.trim()) return true;
+      if (queryIsNumeric) return hasBookingReference(page);
+      return matchesSearchText(page, searchTerm) || arrivalNameMatchesText(searchTerm, page);
+    });
+    if (!matchingPages.length && filenameMatchesBooking) matchingPages = sourcePages;
+    if (!matchingPages.length && isMsg && queryIsNumeric && hasBookingReference(file.pages[0] || "")) {
+      matchingPages = sourcePages;
+    }
+    return matchingPages.flatMap((page) =>
+      extractPeople(page, "", file.company, enableSunCheckInList, true),
+    );
+  }
+
+  // FUN&SUN batch PDFs (Reservations (n), download.pdf, Hotel2Sejour.pdf)
+  // contain many independent vouchers. Parse each page separately and keep
+  // only the page containing the searched arrival guest. Parsing the joined
+  // document makes extractPeople stop at the first "Agency Note" and can
+  // therefore return the first booking's guests instead of the matching room.
+  if (isFunSunIndexedFile(file)) {
+    const sourcePages = isMsg
+      ? (file.attachmentPages || []).filter((attachment) => /\.pdf$/i.test(attachment.name)).flatMap((attachment) => attachment.pages)
+      : (file.visualPages?.length ? file.visualPages : file.pages);
+    const matchingPages = sourcePages.filter((page) => {
+      if (!searchTerm.trim()) return true;
+      return arrivalNameMatchesText(searchTerm, page) || matchesSearchText(page, searchTerm);
+    });
+    return matchingPages.flatMap((page) =>
+      extractPeople(page, "", file.company, enableSunCheckInList),
+    );
+  }
+
+  if (isSun) {
+    const sourcePages = isMsg
+      ? file.pages.slice(1).filter((page) => page.trim())
+      : (file.visualPages?.length ? file.visualPages : file.pages).filter((page) => page.trim());
+    const filename = (file.name || file.path || "").split(/[\\/]/).pop() || "";
+    const compactQuery = normalize(searchTerm).replace(/\s+/g, "");
+    const numericFilename = /^\d+\.pdf$/i.test(filename);
+    const queryIsNumeric = /^\d{5,12}$/.test(compactQuery);
+    const filenameIsExactBooking = numericFilename
+      && filename.replace(/\.pdf$/i, "") === compactQuery;
+    const matchingPages = sourcePages.filter((page) => {
+      if (!searchTerm.trim()) return true;
+      if (filenameIsExactBooking) return true;
+      return matchesSearchText(page, searchTerm) || arrivalNameMatchesText(searchTerm, page);
+    });
+    const pagePeople = matchingPages.flatMap((page) =>
+      extractPeople(page, searchTerm, file.company, true),
+    );
+    if (pagePeople.length) return pagePeople;
+
+    // A numeric single-voucher PDF is itself the booking identity, even when
+    // the reservation number is printed only in the filename.
+    if (filenameIsExactBooking && queryIsNumeric) {
+      return sourcePages.flatMap((page) => extractPeople(page, searchTerm, file.company, true));
+    }
+
+    if (isMsg) {
+      const emailBody = file.pages[0] || file.content || "";
+      return extractPeople(emailBody, searchTerm, file.company, true);
+    }
+    return [];
+  }
+
+  if (!isMsg) {
+    const source = /alltour/i.test(file.company)
+      ? file.pages.join("\n\n--- ALLTOUR PAGE BREAK ---\n\n")
+      : file.pages.join("\n\n");
+    return extractPeople(source || file.content || "", searchTerm, file.company, enableSunCheckInList);
+  }
+
+  const emailBody = file.pages[0] || file.content || "";
+  const fromEmail = extractPeople(emailBody, searchTerm, file.company, enableSunCheckInList);
+  if (fromEmail.length) return fromEmail;
+
+  const attachmentPages = file.pages.slice(1).filter((page) => page.trim());
+  if (!attachmentPages.length) return [];
+
+  const attachmentText = /alltour/i.test(file.company)
+    ? attachmentPages.join("\n\n--- ALLTOUR PAGE BREAK ---\n\n")
+    : attachmentPages.join("\n\n");
+  const fromAllAttachments = extractPeople(attachmentText, searchTerm, file.company, enableSunCheckInList);
+  if (fromAllAttachments.length) return fromAllAttachments;
+
+  // Last fallback: some voucher layouts are page-oriented and should not
+  // accidentally combine rows from separate attachments/pages.
+  return attachmentPages.flatMap((page) => extractPeople(page, searchTerm, file.company, enableSunCheckInList));
+}
+
+/**
+ * Preserve the established extraction route used by Single View. The new
+ * page-aware SUN resolver above is intentionally limited to Multiple View.
+ */
+function extractPeopleFromIndexedFile(
+  file: Pick<IndexedFile, "extension" | "pages" | "content" | "company" | "name" | "path" | "attachmentPages">,
+  searchTerm: string,
+  enableSunCheckInList = false,
+) {
+  const isMsg = file.extension.toLowerCase() === "msg";
+  if (isPlanetIndexedFile(file)) {
+    const sourcePages = isMsg
+      ? (file.attachmentPages || []).filter((attachment) => /\.pdf$/i.test(attachment.name)).flatMap((attachment) => attachment.pages)
+      : file.pages;
+    return extractPlanetPeople(sourcePages, searchTerm);
+  }
+  if (isMtsIndexedFile(file)) {
+    const voucherPages = isMsg
+      ? (file.attachmentPages || []).filter(isMtsVoucherAttachment).flatMap((attachment) => attachment.pages)
+      : /guest\s*voucher/i.test(file.name) ? file.pages : [];
+    if (!voucherPages.length) return [];
+    const compactQuery = normalize(searchTerm).replace(/\s+/g, "");
+    const queryIsBookingNumber = /^\d{5,12}$/.test(compactQuery);
+    const bookingMatches = queryIsBookingNumber && (
+      file.name.replace(/\.msg$|\.pdf$/i, "") === compactQuery
+      || voucherPages.some((page) => getMtsVoucherReference(page) === compactQuery)
+    );
+    const matchingPages = voucherPages.filter((page) =>
+      !searchTerm.trim() || bookingMatches || arrivalNameMatchesText(searchTerm, page)
+      || matchesSearchText(page, searchTerm),
+    );
+    if (!matchingPages.length) return [];
+    // A Guest Voucher List contains independent bookings on separate pages.
+    // Scope extraction to matching page(s) to prevent guests from mixing.
+    return matchingPages.flatMap((page) => extractPeople(page, "", file.company, enableSunCheckInList, true));
+  }
+  if (!isMsg) {
+    const source = /alltour/i.test(file.company)
+      ? file.pages.join("\n\n--- ALLTOUR PAGE BREAK ---\n\n")
+      : file.pages.join("\n\n");
+    return extractPeople(source || file.content || "", searchTerm, file.company, enableSunCheckInList);
+  }
+
+  const emailBody = file.pages[0] || file.content || "";
+  const fromEmail = extractPeople(emailBody, searchTerm, file.company, enableSunCheckInList);
+  if (fromEmail.length) return fromEmail;
+
+  const attachmentPages = file.pages.slice(1).filter((page) => page.trim());
+  if (!attachmentPages.length) return [];
+
+  const attachmentText = /alltour/i.test(file.company)
+    ? attachmentPages.join("\n\n--- ALLTOUR PAGE BREAK ---\n\n")
+    : attachmentPages.join("\n\n");
+  const fromAllAttachments = extractPeople(attachmentText, searchTerm, file.company, enableSunCheckInList);
+  if (fromAllAttachments.length) return fromAllAttachments;
+
+  return attachmentPages.flatMap((page) => extractPeople(page, searchTerm, file.company, enableSunCheckInList));
+}
+
+
+type MultipleGuest = { name: string; dob: string };
+type MultipleCard = {
+  key: string;
+  term: string;
+  arrival: ArrivalRecord | null;
+  file: IndexedFile | null;
+  voucherFile?: IndexedFile | null;
+  voucherPageNumber?: number;
+  people: MultipleGuest[];
+};
+
+function getMtsVoucherReference(text: string) {
+  // MTS/OTS uses numeric voucher references and alphanumeric booking references.
+  const patterns = [
+    /\b(?:voucher\s+reference|booking\s+reference|reservation\s+reference|confirmation\s+reference|booking|reservation|confirmation|voucher\s+ref|reference|ref)\s*(?:number|no\.?|#|id|code)?\s*[:#-]\s*([A-Z0-9]+(?:-[A-Z0-9]+)*)/gi,
+  ];
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      const value = match[1].toUpperCase().replace(/[^A-Z0-9-]/g, "").replace(/-+/g, "-").replace(/^-|-$/g, "");
+      if (value.length >= 5) return value;
+    }
+  }
+  return "";
+}
+
+function getMtsIndexedText(file: IndexedFile) {
+  return [
+    file.name, file.path, file.content, ...file.pages,
+    ...(file.attachmentPages || []).flatMap((attachment) => [attachment.name, ...attachment.pages]),
+  ].join("\n");
+}
+
+function isMtsVoucherAttachment(attachment: { name: string; pages: string[] }) {
+  return /guest\s*voucher/i.test(attachment.name)
+    || attachment.pages.some((page) => /\bVoucher\s+Reference\s+No\.?\s*:/i.test(page)
+      && /\bTravellers\s*:/i.test(page));
+}
+
+function getMtsVoucherCandidates(files: IndexedFile[]) {
+  return files.filter(isMtsIndexedFile).flatMap((file) => {
+    const candidates: { file: IndexedFile; pages: string[]; pageNumbers: number[] }[] = [];
+    if (file.extension.toLowerCase() === "msg") {
+      for (const attachment of file.attachmentPages || []) {
+        if (isMtsVoucherAttachment(attachment)) {
+          const indexedPages = attachment.pages
+            .map((page, index) => ({ page, pageNumber: index + 1 }))
+            .filter((entry) => entry.page.trim());
+          candidates.push({ file, pages: indexedPages.map((entry) => entry.page), pageNumbers: indexedPages.map((entry) => entry.pageNumber) });
+        }
+      }
+    } else if (file.extension.toLowerCase() === "pdf" && /guest\s*voucher/i.test(file.name)) {
+      const sourcePages = file.visualPages?.length ? file.visualPages : file.pages;
+      const indexedPages = sourcePages
+        .map((page, index) => ({ page, pageNumber: index + 1 }))
+        .filter((entry) => entry.page.trim());
+      candidates.push({
+        file,
+        pages: indexedPages.map((entry) => entry.page),
+        pageNumbers: indexedPages.map((entry) => entry.pageNumber),
+      });
+    }
+    return candidates;
+  });
+}
+
+function buildMultipleCards(searchQuery: string, files: IndexedFile[], arrivals: ArrivalRecord[]): MultipleCard[] {
+  const inputTerms = searchQuery.split(/[，,;؛\n]+/).map((part) => part.trim()).filter(Boolean);
+  // A confirmation number can belong to multiple rooms. Expand it into
+  // separate room searches so each guest is resolved against their own arrival.
+  const terms = inputTerms.flatMap((term) => {
+    const compact = normalize(term).replace(/\s+/g, "");
+    const sameConfirmation = arrivals.filter((item) =>
+      normalize(item.confirmationNo).replace(/\s+/g, "") === compact,
+    );
+    return sameConfirmation.length > 1 ? sameConfirmation.map((item) => item.roomNo) : [term];
+  });
+  const mtsFiles = files.filter(isMtsIndexedFile);
+  // Booking emails can have numeric or alphanumeric names (e.g. SG-179412.msg).
+  // Exclude the multi-booking Guest Voucher List message itself.
+  const mtsMessages = mtsFiles.filter((file) =>
+    file.extension.toLowerCase() === "msg" && !/guest\s*voucher/i.test(file.name),
+  );
+  const voucherCandidates = getMtsVoucherCandidates(files);
+  const searchableText = new Map(files.map((file) => [file.id, getMtsIndexedText(file)]));
+
+  return terms.flatMap<MultipleCard>((term, index) => {
+    const compact = normalize(term).replace(/\s+/g, "");
+
+    // Company searches return every booking file in the supplier folder.
+    const companyQuery = getMultipleCompanyQuery(term);
+    if (companyQuery) {
+      const companyFiles = files.filter((candidate) =>
+        isCompanyFolderMatch(candidate.company, companyQuery, files),
+      );
+      return companyFiles.map((companyFile, fileIndex) => ({
+        key: index + "-" + compact + "-" + fileIndex + "-" + companyFile.id,
+        term,
+        arrival: null,
+        file: companyFile,
+        people: extractPeopleForMultipleView(companyFile, "", true),
+      }));
+    }
+
+    const arrival = arrivals.find((item) =>
+      normalize(item.roomNo).replace(/\s+/g, "") === compact
+      || normalize(item.confirmationNo).replace(/\s+/g, "") === compact
+      || (/[a-z\p{L}]/iu.test(term) && normalize(item.name).includes(normalize(term)))
+    ) || null;
+    const targetName = arrival?.name || term;
+    const queryIsBookingNumber = /^\d{5,12}$/.test(compact);
+    let file: IndexedFile | null = null;
+    let voucherFile: IndexedFile | null = null;
+    let voucherPageNumber: number | undefined;
+    let people: MultipleGuest[] = [];
+
+    // MTS priority: first find the exact numeric example.msg by matching
+    // the arrival-report guest name. Only if no numeric MSG matches do we
+    // search Guest Voucher PDFs / PDFs embedded in Outlook messages.
+    const matchedMessage = !queryIsBookingNumber
+      ? mtsMessages.find((candidate) =>
+          arrivalNameMatchesText(targetName, searchableText.get(candidate.id) || ""),
+        )
+      : mtsMessages.find((candidate) =>
+          candidate.name.replace(/\.msg$/i, "") === compact,
+        );
+
+    if (matchedMessage) {
+      file = matchedMessage;
+
+      // The arrival guest's numeric MSG is the primary booking identity.
+      // Once found, locate the matching page in the separate Guest Voucher
+      // List or in this MSG's embedded PDF to extract all travellers.
+      const matchingVoucherPage = voucherCandidates.map((candidate) => {
+        const matchedIndex = candidate.pages.findIndex((page) =>
+          queryIsBookingNumber
+            ? getMtsVoucherReference(page).replace(/-/g, "") === compact
+            : arrivalNameMatchesText(targetName, page),
+        );
+        return {
+          ...candidate,
+          matchedPage: matchedIndex >= 0 ? candidate.pages[matchedIndex] : undefined,
+          matchedPageNumber: matchedIndex >= 0 ? candidate.pageNumbers[matchedIndex] : undefined,
+        };
+      }).find((candidate) => Boolean(candidate.matchedPage));
+
+      if (matchingVoucherPage?.matchedPage) {
+        voucherFile = matchingVoucherPage.file;
+        voucherPageNumber = matchingVoucherPage.matchedPageNumber;
+        people = extractPeople(matchingVoucherPage.matchedPage, "", matchingVoucherPage.file.company, true, true);
+      } else {
+        const attachedVoucher = (matchedMessage.attachmentPages || []).find(isMtsVoucherAttachment);
+        const matchedPageIndex = attachedVoucher?.pages.findIndex((page) =>
+          queryIsBookingNumber
+            ? getMtsVoucherReference(page).replace(/-/g, "") === compact
+            : arrivalNameMatchesText(targetName, page),
+        ) ?? -1;
+        const matchedPage = matchedPageIndex >= 0 ? attachedVoucher?.pages[matchedPageIndex] : undefined;
+        if (matchedPage) {
+          voucherFile = matchedMessage;
+          voucherPageNumber = matchedPageIndex + 1;
+          people = extractPeople(matchedPage, "", matchedMessage.company, true, true);
+        }
+      }
+    } else {
+      const matchedVoucher = voucherCandidates.map((candidate) => {
+        const matchedIndex = candidate.pages.findIndex((page) => queryIsBookingNumber
+          ? getMtsVoucherReference(page).replace(/-/g, "") === compact
+          : arrivalNameMatchesText(targetName, page));
+        return {
+          ...candidate,
+          matchedPage: matchedIndex >= 0 ? candidate.pages[matchedIndex] : undefined,
+          matchedPageNumber: matchedIndex >= 0 ? candidate.pageNumbers[matchedIndex] : undefined,
+        };
+      }).find((candidate) => Boolean(candidate.matchedPage));
+
+      if (matchedVoucher?.matchedPage) {
+        voucherFile = matchedVoucher.file;
+        voucherPageNumber = matchedVoucher.matchedPageNumber;
+        people = extractPeople(matchedVoucher.matchedPage, "", matchedVoucher.file.company, true, true);
+
+        // Resolve the exact booking MSG from the voucher reference, whether
+        // numeric (616310.msg) or alphanumeric (SG-179412.msg).
+        const reference = getMtsVoucherReference(matchedVoucher.matchedPage).toLowerCase();
+        const sameFolder = (candidate: IndexedFile) =>
+          candidate.path.replace(/[\\/][^\\/]+$/, "").toLowerCase()
+          === matchedVoucher.file.path.replace(/[\\/][^\\/]+$/, "").toLowerCase();
+        const referenceMessage = reference
+          ? mtsMessages.find((candidate) =>
+              candidate.name.replace(/\.msg$/i, "").toLowerCase() === reference && sameFolder(candidate),
+            ) || mtsMessages.find((candidate) =>
+              candidate.name.replace(/\.msg$/i, "").toLowerCase() === reference,
+            )
+          : undefined;
+        file = referenceMessage || matchedVoucher.file;
+      }
+    }
+
+    // Preserve the existing SUN and other supplier search routes.
+    const hasMtsNameMatch = mtsFiles.some((candidate) =>
+      arrival
+        ? arrivalNameMatchesText(targetName, searchableText.get(candidate.id) || "")
+        : matchesSearchText(searchableText.get(candidate.id) || "", term),
+    );
+    if (!file && !hasMtsNameMatch) {
+      const matchingFiles = files.filter((candidate) => {
+        if (isMtsIndexedFile(candidate)) return false;
+        const text = searchableText.get(candidate.id) || "";
+        return arrival ? arrivalNameMatchesText(targetName, text) : matchesSearchText(text, term);
+      });
+      // Use the supplier explicitly printed in arr.pdf before considering
+      // same-name hits from other operators (e.g. Biblio rooming-list emails).
+      const companyScopedFiles = arrival?.company
+        ? matchingFiles.filter((candidate) =>
+            isCompanyFolderMatch(candidate.company, arrival.company || "", files),
+          )
+        : [];
+      const sourceFiles = companyScopedFiles.length ? companyScopedFiles : matchingFiles;
+      const funSunFiles = sourceFiles.filter(isFunSunIndexedFile);
+      const prioritizedFunSunFiles = [...funSunFiles].sort((left, right) =>
+        getFunSunFilePriority(left) - getFunSunFilePriority(right),
+      );
+      const sunFiles = sourceFiles.filter(isSunInternationalIndexedFile);
+      const prioritizedSunFiles = [...sunFiles].sort((left, right) => {
+        const priority = (candidate: IndexedFile) => {
+          if (candidate.extension !== "pdf") return candidate.extension === "msg" ? 4 : 5;
+          const filename = candidate.name.split(/[\\/]/).pop() || candidate.name;
+          if (/^hotel2sejour\.pdf$/i.test(filename)) return 0;
+          if (/^final\.pdf$/i.test(filename)) return 1;
+          if (/^reservations\s*\(\s*\d+\s*\)\.pdf$/i.test(filename)) return 2;
+          if (/^\d+\.pdf$/i.test(filename)) return 3;
+          if (/\bHOTEL\s+C\/IN\s+LIST\b/i.test(candidate.content + " " + candidate.pages.join(" "))) return 4;
+          return 5;
+        };
+        return priority(left) - priority(right);
+      });
+      file = prioritizedFunSunFiles[0] || prioritizedSunFiles[0] || sourceFiles[0] || null;
+      if (file) {
+        // When the booking number is the exact MSG/PDF filename, it identifies
+        // the document itself. Do not pass that numeric code as a guest-name
+        // filter; extract the complete guest list from the matched booking.
+        const fileCode = file.name.replace(/\.(?:msg|pdf)$/i, "").toLowerCase();
+        const queryIdentifiesFilename = fileCode === compact.toLowerCase();
+        people = extractPeopleForMultipleView(file, queryIdentifiesFilename ? "" : targetName, true);
+      }
+    }
+
+    // A booking code can point to a separate file for each reservation.
+    // Return all exact code hits instead of silently selecting the first one.
+    const isAlphanumericReference = !arrival && /^[a-z0-9-]{5,}$/i.test(compact);
+    if (isAlphanumericReference && (!file || !isMtsIndexedFile(file))) {
+      const referenceFiles = files.filter((candidate) =>
+        !isMtsIndexedFile(candidate) && matchesSearchText(getMtsIndexedText(candidate), term),
+      );
+      if (referenceFiles.length) {
+        return referenceFiles.map((referenceFile, fileIndex) => {
+          const referenceCode = referenceFile.name.replace(/\.(?:msg|pdf)$/i, "").toLowerCase();
+          const queryIdentifiesFilename = referenceCode === compact.toLowerCase();
+          const extracted = extractPeopleForMultipleView(referenceFile, queryIdentifiesFilename ? "" : term, true);
+          const unique = isW2mIndexedFile(referenceFile) || isSunInternationalIndexedFile(referenceFile)
+            ? extracted
+            : extracted.filter((person, personIndex, all) =>
+                all.findIndex((candidate) => normalize(candidate.name) === normalize(person.name)
+                  && normalize(candidate.dob) === normalize(person.dob)) === personIndex);
+          return {
+            key: index + "-" + compact + "-" + fileIndex + "-" + referenceFile.id,
+            term, arrival: null, file: referenceFile, people: unique,
+          };
+        });
+      }
+    }
+
+    const uniquePeople = file && (isMtsIndexedFile(file) || isSunInternationalIndexedFile(file) || isW2mIndexedFile(file))
+      ? people
+      : people.filter((person, personIndex, all) =>
+          all.findIndex((candidate) => normalize(candidate.name) === normalize(person.name)
+            && normalize(candidate.dob) === normalize(person.dob)) === personIndex);
+    return [{ key: index + "-" + compact, term, arrival, file, voucherFile, voucherPageNumber, people: uniquePeople }];
+  });
+}
+
 export default function GuestNameExtractorPage() {
+  const { setFolderPath: saveSharedFolder, getFile: getSharedFile } = useFileLibrary();
   const [files, setFiles] = useState<IndexedFile[]>([]);
   const [query, setQuery] = useState("");
+  const [multipleSearchQuery, setMultipleSearchQuery] = useState("");
+  const [multipleDraftQuery, setMultipleDraftQuery] = useState("");
+  const [multipleCardsData, setMultipleCardsData] = useState<MultipleCard[]>([]);
+  const [multipleSearching, setMultipleSearching] = useState(false);
+  const [viewMode, setViewMode] = useState<"single" | "multiple">("single");
+
+  const [arrivalFrom, setArrivalFrom] = useState("");
+  const [arrivalTo, setArrivalTo] = useState("");
+  const [arrivalCompanyFilter, setArrivalCompanyFilter] = useState("all");
+  const [multipleSort, setMultipleSort] = useState<"input" | "company" | "room">("input");
+  const [multipleCopyStatus, setMultipleCopyStatus] = useState("");
+  const [greenCards, setGreenCards] = useState<string[]>([]);
+
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("guest-extractor-green-cards-v1") || "[]");
+      if (Array.isArray(saved)) setGreenCards(saved.filter((item): item is string => typeof item === "string"));
+    } catch { /* ignore invalid saved card colors */ }
+  }, []);
+
+  useEffect(() => {
+    try { localStorage.setItem("guest-extractor-green-cards-v1", JSON.stringify(greenCards)); }
+    catch { /* ignore unavailable local storage */ }
+  }, [greenCards]);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [error, setError] = useState("");
   const [warnings, setWarnings] = useState<string[]>([]);
   const [folderName, setFolderName] = useState("");
+  const [nativeFolderPath, setNativeFolderPath] = useState("");
+  const [isDesktop, setIsDesktop] = useState(false);
   const [selected, setSelected] = useState<SearchResult | null>(null);
+  const [showCapitalizer, setShowCapitalizer] = useState(false);
+  const [capitalizerText, setCapitalizerText] = useState("");
+  const [capitalizerPosition, setCapitalizerPosition] = useState({ x: 24, y: 110 });
+  const capitalizerDrag = useRef<{ pointerId: number; offsetX: number; offsetY: number } | null>(null);
+
   const [msgPreview, setMsgPreview] = useState<MsgPreviewData | null>(null);
   const [msgPreviewError, setMsgPreviewError] = useState("");
+  const [autoOpenMtsVoucher, setAutoOpenMtsVoucher] = useState(false);
+  const [mtsPrintRequest, setMtsPrintRequest] = useState<{ item: IndexedFile; pageInput: string } | null>(null);
+  const [anexPrintRequest, setAnexPrintRequest] = useState<{ item: IndexedFile; pageInput: string } | null>(null);
   const [activeAttachment, setActiveAttachment] = useState<MsgAttachmentPreview | null>(null);
   const [attachmentSearchQuery, setAttachmentSearchQuery] = useState("");
   const [attachmentSearchMatches, setAttachmentSearchMatches] = useState<AttachmentSearchMatch[]>([]);
@@ -802,88 +1962,70 @@ export default function GuestNameExtractorPage() {
   const [activeAttachmentPage, setActiveAttachmentPage] = useState(1);
   const [attachmentPdfSearchTerm, setAttachmentPdfSearchTerm] = useState("");
   useEffect(() => () => { msgPreview?.attachments.forEach((attachment) => URL.revokeObjectURL(attachment.url)); }, [msgPreview]);
+
+  useEffect(() => {
+    if (!autoOpenMtsVoucher || !selected || !isMtsIndexedFile(selected) || !msgPreview) return;
+    const voucher = msgPreview.attachments.find((attachment) => /guest\s*voucher/i.test(attachment.name) && (attachment.type === "application/pdf" || attachment.name.toLowerCase().endsWith(".pdf")));
+    setAutoOpenMtsVoucher(false);
+    if (voucher) {
+      setActiveAttachment(voucher);
+      setActiveAttachmentPage(1);
+      setAttachmentSearchMatches([]);
+      setAttachmentSearchStatus("");
+      setAttachmentPdfSearchTerm("");
+    } else {
+      setMsgPreviewError("تم فتح رسالة MTS، لكن لم يتم العثور على ملف PDF مرفق بها.");
+    }
+  }, [autoOpenMtsVoucher, selected, msgPreview]);
   const [currentPage, setCurrentPage] = useState(1);
   const [restoreComplete, setRestoreComplete] = useState(false);
   const [storageMessage, setStorageMessage] = useState("جارٍ استعادة المجلد المحفوظ...");
-  const [browserStorage, setBrowserStorage] = useState<{ usage: number; quota: number } | null>(null);
   const [arrivals, setArrivals] = useState<ArrivalRecord[]>([]);
   const [arrivalReportName, setArrivalReportName] = useState("");
   const [arrivalStatus, setArrivalStatus] = useState("");
   const [arrivalBusy, setArrivalBusy] = useState(false);
   const arrivalInputRef = useRef<HTMLInputElement>(null);
+  const nativeScanInProgressRef = useRef(false);
 
-  async function refreshBrowserStorage() {
-    try {
-      // IndexedDB writes/deletes may finish before the browser's quota
-      // estimate reflects the new usage. Wait briefly, then read the
-      // browser-managed estimate so the counter is less likely to show
-      // the previous value immediately after an upload or deletion.
-      await new Promise<void>((resolve) => window.setTimeout(resolve, 300));
-      const estimate = await readBrowserStorageEstimate();
-      setBrowserStorage(estimate);
-    } catch {
-      setBrowserStorage(null);
-    }
-  }
   const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { setIsDesktop(Boolean(window.desktopBridge)); }, []);
+
+  useEffect(() => {
+    if (!isDesktop || !nativeFolderPath || !window.desktopBridge) return;
+    // Folder watcher notifications must never trigger a full re-index.
+    // Searching is always performed against the in-memory index loaded once
+    // when the app opens. The user can explicitly refresh if files changed.
+    const unsubscribe = window.desktopBridge.onFolderChanged(() => {
+      setStorageMessage("تم رصد تغيير في مجلد الحجوزات. نتائج البحث الحالية تستخدم الفهرس المحمّل؛ اضغط «فحص التحديثات» فقط إذا أردت إعادة الفهرسة.");
+    });
+    return () => {
+      unsubscribe();
+      void window.desktopBridge?.unwatchFolder();
+    };
+  }, [isDesktop, nativeFolderPath]);
+
   useEffect(() => {
     let active = true;
-    void refreshBrowserStorage();
     async function restoreSession() {
       try {
-        const [storedFiles, savedStateText] = await Promise.all([
-          loadGuestFiles(),
-          Promise.resolve(localStorage.getItem(GUEST_STATE_KEY)),
-        ]);
+        const savedState = JSON.parse(localStorage.getItem(GUEST_STATE_KEY) || "{}");
+        // Electron userData survives the random local server port on each launch.
+        const savedNativePath = window.desktopBridge
+          ? await window.desktopBridge.getSavedFolderPath().catch(() => localStorage.getItem(NATIVE_FOLDER_KEY) || "")
+          : "";
         if (!active) return;
-
-        // Re-parse saved Outlook MSG files. Older cached records may contain
-        // the raw OLE/binary bytes as text from before MSG parsing was enabled.
-        let migratedMsgFiles = false;
-        const savedFiles = await Promise.all(storedFiles.map(async (item) => {
-          if (item.extension?.toLowerCase() !== "msg") return item;
-          try {
-            const extracted = await extractText(item.file, "msg");
-            migratedMsgFiles = true;
-            return { ...item, content: extracted.content, pages: extracted.pages };
-          } catch {
-            return item;
-          }
-        }));
-        if (migratedMsgFiles) {
-          try { await saveGuestFiles(savedFiles); } catch { /* Keep the readable session data even if migration cannot be persisted. */ }
-        }
-        const savedState = savedStateText ? JSON.parse(savedStateText) : {};
-        setFiles(savedFiles);
-        const savedArrivals = localStorage.getItem(ARRIVAL_REPORT_KEY);
-        if (savedArrivals) {
-          const parsed = JSON.parse(savedArrivals) as ArrivalRecord[];
-          if (Array.isArray(parsed)) setArrivals(parsed);
-          setArrivalStatus(parsed.length ? `تم استعادة ${parsed.length} حجز من تقرير الوصول المحفوظ.` : "");
-        }
-        void refreshBrowserStorage();
-        setFolderName(String(savedState.folderName || (savedFiles[0]?.path.split("/")[0] ?? "")));
-        const savedQuery = String(savedState.query || "");
-        setQuery(savedQuery);
-        const savedPage = Math.max(1, Number(savedState.currentPage) || 1);
-        setCurrentPage(savedPage);
-        if (savedState.selectedId) {
-          const item = savedFiles.find((file) => file.id === savedState.selectedId);
-          if (item) {
-            const q = normalize(savedQuery);
-            const matchedPages = item.pages.reduce<number[]>((acc, page, index) => {
-              if (normalize([item.name, item.path, item.company, page].join(" ")).includes(q)) acc.push(index + 1);
-              return acc;
-            }, []);
-            setSelected({ ...item, matchedPages: matchedPages.length ? matchedPages : [1] });
-            setCurrentPage(Math.min(savedPage, Math.max(1, item.pages.length)));
-          }
-        }
-        setStorageMessage(savedFiles.length
-          ? `تم استعادة ${savedFiles.length.toLocaleString("en-US")} ملف من ذاكرة المتصفح.`
-          : "لا يوجد مجلد محفوظ حاليًا. اختر مجلد الحجوزات للبدء.");
+        const savedArrivals = JSON.parse(localStorage.getItem(ARRIVAL_REPORT_KEY) || "[]");
+        if (Array.isArray(savedArrivals)) setArrivals(savedArrivals as ArrivalRecord[]);
+        setFolderName(String(savedState.folderName || ""));
+        setQuery(String(savedState.query || ""));
+        setCurrentPage(Math.max(1, Number(savedState.currentPage) || 1));
+        setNativeFolderPath(savedNativePath);
+        setStorageMessage(savedNativePath
+          ? "تم استعادة مسار مجلد الحجوزات. جارٍ قراءة الملفات الأصلية مباشرة..."
+          : "اختر مجلد الحجوزات للبدء. لا يتم إنشاء قاعدة بيانات أو حفظ نسخ من الملفات.");
+        if (savedNativePath && window.desktopBridge) void scanNativeFolder(savedNativePath);
       } catch {
-        if (active) setStorageMessage("تعذرت استعادة المجلد المحفوظ. قد تكون بيانات الموقع قد مُسحت أو مساحة التخزين غير متاحة.");
+        if (active) setStorageMessage("تعذرت استعادة مسار مجلد الحجوزات. اختر المجلد مرة أخرى.");
       } finally {
         if (active) setRestoreComplete(true);
       }
@@ -904,7 +2046,9 @@ export default function GuestNameExtractorPage() {
     } catch { /* تجاهل تعذر حفظ حالة العرض */ }
   }, [restoreComplete, folderName, query, selected, currentPage]);
 
-  const previewUrl = useMemo(() => selected ? URL.createObjectURL(selected.file) : "", [selected]);
+  const previewUrl = useMemo(() => selected
+    ? URL.createObjectURL(new Blob([selected.file], { type: getPreviewMimeType(selected.extension) }))
+    : "", [selected]);
   useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
 
   const results = useMemo<SearchResult[]>(() => {
@@ -918,21 +2062,34 @@ export default function GuestNameExtractorPage() {
     );
     const isArrivalNumberSearch = linkedArrivalGuests.length > 0;
     const matchingArrivalNames = linkedArrivalGuests.map((item) => item.name);
+    const isLturFallbackQuery = q.replace(/\s+/g, "") === "ltur"
+      && !files.some((item) => normalizeCompanyKey(item.company) === "ltur");
 
-    return files.flatMap((item) => {
+    const matchedResults = files.flatMap((item) => {
       const matchedPages = item.pages.reduce<number[]>((acc, page, index) => {
         const searchable = [item.name, item.path, item.company, page].join(" ");
         const matchesLinkedGuest = matchingArrivalNames.some((name) => arrivalNameMatchesText(name, searchable));
-        const matchesDirectQuery = !isArrivalNumberSearch && normalize(searchable).includes(q);
+        const matchesDirectQuery = !isArrivalNumberSearch && (
+          matchesSearchText(searchable, query)
+          || (isLturFallbackQuery && normalizeCompanyKey(item.company) === "tui")
+        );
         if (matchesDirectQuery || matchesLinkedGuest) {
           acc.push(index + 1);
         }
         return acc;
       }, []);
-      if (!isArrivalNumberSearch && normalize([item.name, item.path, item.company].join(" ")).includes(q) && !matchedPages.length) {
+      if (!isArrivalNumberSearch && matchesSearchText([item.name, item.path, item.company].join(" "), query) && !matchedPages.length) {
         matchedPages.push(1);
       }
       return matchedPages.length ? [{ ...item, matchedPages }] : [];
+    });
+    return matchedResults.filter((item) => {
+      if (!isMtsIndexedFile(item)) return true;
+      const folderPath = item.path.replace(/[\\/][^\\/]+$/, "").toLowerCase();
+      const folderFiles = files.filter((candidate) => isMtsIndexedFile(candidate) && candidate.path.replace(/[\\/][^\\/]+$/, "").toLowerCase() === folderPath);
+      const bookingMessages = folderFiles.filter((candidate) => candidate.extension.toLowerCase() === "msg" && /^\d+\.msg$/i.test(candidate.name));
+      if (bookingMessages.length) return item.extension.toLowerCase() === "msg" && /^\d+\.msg$/i.test(item.name);
+      return /guest\s*voucher/i.test(item.name) && ["pdf", "msg"].includes(item.extension.toLowerCase());
     });
   }, [files, query, arrivals]);
 
@@ -945,6 +2102,66 @@ export default function GuestNameExtractorPage() {
       || normalize(item.name).includes(normalize(query)),
     );
   }, [arrivals, query]);
+
+  // Resolve each arr.pdf booking to the company folder containing its guest name.
+  // This lets the arrival-time filter work by company without changing arr.pdf parsing.
+  const arrivalCompanies = useMemo(() => {
+    const companyByConfirmation = new Map<string, string>();
+    for (const arrival of arrivals) {
+      const matchedFile = files.find((candidate) =>
+        candidate.pages.some((page) =>
+          arrivalNameMatchesText(arrival.name, [candidate.name, candidate.path, candidate.company, page].join(" ")),
+        ),
+      );
+      companyByConfirmation.set(arrival.confirmationNo, arrival.company || matchedFile?.company || "غير محددة");
+    }
+    return companyByConfirmation;
+  }, [arrivals, files]);
+
+  const arrivalCompanyOptions = useMemo(
+    () => Array.from(new Set(Array.from(arrivalCompanies.values()))).sort((a, b) => a.localeCompare(b, "ar")),
+    [arrivalCompanies],
+  );
+
+  const arrivalTimeMatches = useMemo(() => {
+    if (!arrivalFrom && !arrivalTo && arrivalCompanyFilter === "all") return [];
+    return arrivals.filter((item) =>
+      (!arrivalFrom || item.arrivalTime >= arrivalFrom)
+      && (!arrivalTo || item.arrivalTime <= arrivalTo)
+      && (arrivalCompanyFilter === "all" || arrivalCompanies.get(item.confirmationNo) === arrivalCompanyFilter),
+    ).sort((x, y) => x.arrivalTime.localeCompare(y.arrivalTime));
+  }, [arrivals, arrivalFrom, arrivalTo, arrivalCompanyFilter, arrivalCompanies]);
+
+  const multipleCards = useMemo(() => multipleCardsData.filter((card) => {
+    if (arrivalCompanyFilter === "all") return true;
+    const arrivalCompany = card.arrival ? arrivalCompanies.get(card.arrival.confirmationNo) : "";
+    const company = arrivalCompany && arrivalCompany !== "غير محددة" ? arrivalCompany : card.file?.company || "غير محددة";
+    return company === arrivalCompanyFilter
+      || Boolean(card.file && isCompanyFolderMatch(card.file.company, arrivalCompanyFilter, files));
+  }).sort((left, right) => {
+    if (multipleSort === "company") {
+      const companyCompare = (left.file?.company || "غير محددة").localeCompare(right.file?.company || "غير محددة", "ar", { sensitivity: "base" });
+      if (companyCompare) return companyCompare;
+    }
+    if (multipleSort === "room" || multipleSort === "company") {
+      return (left.arrival?.roomNo || "").localeCompare(right.arrival?.roomNo || "", undefined, { numeric: true });
+    }
+    return 0;
+  }), [multipleCardsData, multipleSort, arrivalCompanyFilter, arrivalCompanies, files]);
+
+  async function runMultipleSearch() {
+    const searchText = multipleDraftQuery.trim();
+    if (!searchText || multipleSearching || busy) return;
+    setMultipleSearching(true);
+    setMultipleSearchQuery(searchText);
+    setMultipleCardsData([]);
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 40));
+    try {
+      setMultipleCardsData(buildMultipleCards(searchText, files, arrivals));
+    } finally {
+      setMultipleSearching(false);
+    }
+  }
 
   const companies = useMemo(() => new Set(files.map((file) => file.company).filter((name) => name !== "غير محددة")).size, [files]);
   const totalSize = useMemo(() => files.reduce((sum, file) => sum + file.size, 0), [files]);
@@ -959,21 +2176,23 @@ export default function GuestNameExtractorPage() {
   // AllTours booking references can be found on a different page from the
   // guest table. Parse the complete MSG/PDF page set for this company so a
   // search by voucher number still displays every guest in that booking.
-  const eagleTablePage = selected?.extension.toLowerCase() === "msg"
-    ? selected.pages.find((page) => /\bNames\b[\s\S]{0,200}\bAge\b[\s\S]{0,100}\bACC\b/i.test(page))
-    : undefined;
-  const peopleSourceText = selected && (
-    /alltour/i.test(selected.company)
-    || selected.pages.some((page) =>
-      /HOTEL\s+RESERVATION\s+FORM/i.test(page)
-      && /SURNAME,\s*NAME/i.test(page)
-      && /VOUCHER\s+NR/i.test(page),
-    )
-  ) ? selected.pages.join("\n\n--- ALLTOUR PAGE BREAK ---\n\n")
-    : eagleTablePage || pageText;
+  // When the search is a room or confirmation number, use the linked guest name
+  // as the parser query. Passing the numeric identifier to a voucher parser can
+  // make it match an unrelated number in the page and return a stray row.
+  const arrivalSearchQuery = useMemo(() => {
+    const q = normalize(query).replace(/\s+/g, "");
+    if (!q) return "";
+    const linked = arrivals.filter((item) =>
+      normalize(item.roomNo).replace(/\s+/g, "") === q
+      || normalize(item.confirmationNo).replace(/\s+/g, "") === q
+    );
+    return linked.map((item) => item.name).filter(Boolean).join(" ");
+  }, [arrivals, query]);
+
+  const effectivePeopleQuery = arrivalSearchQuery || query;
   const extractedPeople = useMemo(
-    () => extractPeople(peopleSourceText, query, selected?.company || ""),
-    [peopleSourceText, query, selected?.company],
+    () => selected ? extractPeopleFromIndexedFile(selected, effectivePeopleQuery) : [],
+    [selected, effectivePeopleQuery],
   );
 
   async function uploadArrivalReport(selectedFiles: FileList | null) {
@@ -1015,6 +2234,7 @@ export default function GuestNameExtractorPage() {
     const root = allFiles[0].webkitRelativePath?.split("/")[0] || "المجلد المحدد";
     const readable = allFiles.filter((file) => SUPPORTED.has(file.name.split(".").pop()?.toLowerCase() || ""));
     setBusy(true); setError(""); setWarnings([]); setFiles([]); setQuery(""); setSelected(null);
+    setMultipleDraftQuery(""); setMultipleSearchQuery(""); setMultipleCardsData([]);
     setFolderName(root); setProgress({ done: 0, total: readable.length });
     const indexed: IndexedFile[] = []; const failed: string[] = [];
     for (let index = 0; index < readable.length; index++) {
@@ -1025,22 +2245,104 @@ export default function GuestNameExtractorPage() {
         const folderMetadata = getFolderMetadata(path);
         indexed.push({ id: path + "-" + file.lastModified + "-" + index, name: file.name, path,
           ...folderMetadata, extension, size: file.size, content: extracted.content,
-          pages: extracted.pages, file });
-      } catch { failed.push(path); }
+          pages: extracted.pages, visualPages: extracted.visualPages, attachmentPages: extracted.attachmentPages, file });
+      } catch (readError) {
+        const reason = readError instanceof Error ? readError.message : String(readError);
+        failed.push(`${path} — ${reason || "سبب غير معروف"}`);
+      }
       setProgress({ done: index + 1, total: readable.length });
     }
-    try {
-      await saveGuestFiles(indexed);
-      await refreshBrowserStorage();
-      setStorageMessage(`تم حفظ ${indexed.length.toLocaleString("en-US")} ملف محليًا في المتصفح. لن تحتاج إلى اختيار المجلد بعد Refresh.`);
-    } catch {
-      setStorageMessage("تم فحص الملفات لهذه الجلسة، لكن تعذر حفظها بشكل دائم. قد تكون مساحة التخزين غير كافية.");
-    }
+    setStorageMessage(`تمت قراءة ${indexed.length.toLocaleString("en-US")} ملف لهذه الجلسة فقط. لا يتم حفظ الملفات أو إنشاء قاعدة بيانات.`);
     setFiles(indexed); setWarnings(failed); setBusy(false);
     if (!readable.length) setError("لم أجد ملفات مدعومة داخل المجلد. الملفات المدعومة: PDF وWord DOCX وOutlook MSG وTXT وCSV وXML.");
     else if (!indexed.length) setError("تعذرت قراءة الملفات المحددة. تحقق من سلامة الملفات ثم حاول مرة أخرى.");
   }
 
+
+  async function chooseNativeFolder() {
+    if (!window.desktopBridge) {
+      inputRef.current?.click();
+      return;
+    }
+    try {
+      const selectedPath = await window.desktopBridge.selectFolder();
+      if (selectedPath) await scanNativeFolder(selectedPath);
+    } catch (scanError) {
+      setError(scanError instanceof Error ? scanError.message : "تعذر الوصول إلى المجلد المحدد.");
+    }
+  }
+
+  async function scanNativeFolder(rootPath: string) {
+    if (!window.desktopBridge) return;
+    // Ignore duplicate folder-change events while a full indexing pass is running.
+    if (nativeScanInProgressRef.current) return;
+    nativeScanInProgressRef.current = true;
+    setBusy(true); setError(""); setWarnings([]); setFiles([]); setQuery(""); setSelected(null);
+    setMultipleDraftQuery(""); setMultipleSearchQuery(""); setMultipleCardsData([]);
+    setNativeFolderPath(rootPath);
+    setFolderName(rootPath);
+    localStorage.setItem(NATIVE_FOLDER_KEY, rootPath);
+    setStorageMessage("جارٍ فهرسة الملفات مباشرة من مجلد Windows دون رفعها أو نسخها إلى ذاكرة المتصفح...");
+    setProgress({ done: 0, total: 0 });
+    const indexed: IndexedFile[] = [];
+    const failed: string[] = [];
+    try {
+      const entries = await saveSharedFolder("reservations", rootPath);
+      const watchEnabled = await window.desktopBridge.watchFolder(rootPath);
+      setProgress({ done: 0, total: entries.length });
+      for (let index = 0; index < entries.length; index++) {
+        const entry = entries[index];
+        const extension = entry.name.split(".").pop()?.toLowerCase() || "";
+        try {
+          const file = await getSharedFile("reservations", entry);
+          const extracted = await extractText(file, extension);
+          const folderMetadata = getNativeFolderMetadata(entry.relativePath);
+          indexed.push({
+            id: entry.path + "-" + entry.mtimeMs,
+            name: entry.name,
+            path: entry.path,
+            ...folderMetadata,
+            extension,
+            size: entry.size,
+            content: extracted.content,
+            pages: extracted.pages,
+            visualPages: extracted.visualPages,
+            attachmentPages: extracted.attachmentPages,
+            file,
+          });
+        } catch (readError) {
+          const reason = readError instanceof Error ? readError.message : String(readError);
+          failed.push(`${entry.relativePath} — ${reason || "سبب غير معروف"}`);
+        }
+        // Avoid thousands of React renders; update progress in small batches.
+        if ((index + 1) % 10 === 0 || index === entries.length - 1) {
+          setProgress({ done: index + 1, total: entries.length });
+        }
+        // Yield to Chromium so the window can paint and respond to user input.
+        if ((index + 1) % 5 === 0) {
+          await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+        }
+      }
+      setFiles(indexed);
+      setWarnings(failed);
+      setStorageMessage(`تم فهرسة ${indexed.length.toLocaleString("en-US")} ملف من المجلد الأصلي مباشرة. ${watchEnabled ? "مراقبة التغييرات والإضافات الجديدة مفعّلة." : "تعذر تفعيل المراقبة التلقائية؛ استخدم زر فحص التحديثات عند إضافة ملفات."} لن يتم نسخ الملفات إلى ذاكرة المتصفح.`);
+      if (!entries.length) setError("لم أجد ملفات مدعومة داخل المجلد المحدد.");
+      else if (!indexed.length) setError("تعذرت قراءة الملفات. تحقق من صلاحيات المجلد أو سلامة الملفات.");
+      else if (entries.length >= 20000) setError("تم الوصول إلى حد الفهرسة البالغ 20,000 ملف. اختر مجلداً فرعياً لتقليل نطاق البحث.");
+    } catch (scanError) {
+      setError(scanError instanceof Error ? scanError.message : "تعذرت قراءة المجلد المحدد.");
+      setStorageMessage("تعذرت فهرسة المجلد. تحقق من اتصال القرص أو صلاحيات الوصول.");
+    } finally {
+      nativeScanInProgressRef.current = false;
+      setBusy(false);
+    }
+  }
+
+
+  function openPreviewWithCapitalizer(item: SearchResult) {
+    setShowCapitalizer(true);
+    openPreview(item);
+  }
 
   function openPreview(item: SearchResult) {
     setSelected(item);
@@ -1187,39 +2489,309 @@ export default function GuestNameExtractorPage() {
     window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
   }
 
-  function openOriginalMsgInOutlook() {
+  async function openOriginalMsgInOutlook() {
     if (!selected || selected.extension.toLowerCase() !== "msg") return;
-    // Ask the browser/OS to handle the untouched MSG blob in a new tab.
-    // Whether this launches Outlook depends on browser and Windows file associations.
-    const outlookBlob = new Blob([selected.file], { type: "application/vnd.ms-outlook" });
-    const url = URL.createObjectURL(outlookBlob);
-    const opened = window.open(url, "_blank", "noopener,noreferrer");
-    if (!opened) {
-      URL.revokeObjectURL(url);
-      downloadOriginalMsg();
-      setStorageMessage("منع المتصفح فتح نافذة جديدة؛ تم بدء تنزيل ملف MSG الأصلي بدلاً من ذلك.");
+    // In the desktop app, open the original file path through Windows file associations.
+    // This allows Outlook (if installed and associated with .msg) to open the real file.
+    if (window.desktopBridge && (selected.path.startsWith("\\\\") || /^[a-zA-Z]:[\\/]/.test(selected.path))) {
+      try {
+        const opened = await window.desktopBridge.openPath(selected.path);
+        setStorageMessage(opened
+          ? "تم إرسال ملف Outlook الأصلي إلى Windows لفتحه بالتطبيق المرتبط بملفات MSG."
+          : "تعذر فتح الملف تلقائياً. تأكد من تثبيت Outlook وارتباط ملفات MSG به، أو استخدم زر تنزيل الملف الأصلي.");
+      } catch {
+        setStorageMessage("تعذر فتح ملف MSG في Outlook. استخدم زر تنزيل الملف الأصلي.");
+      }
       return;
     }
-    window.setTimeout(() => URL.revokeObjectURL(url), 5 * 60_000);
-    setStorageMessage("تم إرسال ملف MSG الأصلي إلى المتصفح لمحاولة فتحه. إذا لم يفتح Outlook، استخدم زر تنزيل الملف الأصلي.");
+    // Browser fallback: download the untouched message for opening in Outlook.
+    downloadOriginalMsg();
+    setStorageMessage("تم تنزيل ملف MSG الأصلي. افتحه باستخدام Outlook إذا كان مثبتاً على جهازك.");
+  }
+
+  async function openMtsOutlookFile(item: IndexedFile) {
+    if (item.extension.toLowerCase() !== "msg") return;
+    if (!window.desktopBridge) {
+      const url = URL.createObjectURL(item.file);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = item.name;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      setStorageMessage("تم تنزيل ملف Outlook الأصلي. افتحه باستخدام Outlook.");
+      return;
+    }
+    try {
+      const opened = await window.desktopBridge.openPath(item.path);
+      setStorageMessage(opened
+        ? "تم إرسال ملف MTS الأصلي إلى Windows لفتحه باستخدام Outlook."
+        : "تعذر فتح ملف MTS. تحقق من تثبيت Outlook وارتباط ملفات MSG به.");
+    } catch {
+      setStorageMessage("تعذر فتح ملف MTS في Outlook.");
+    }
+  }
+
+  function openMtsVoucher(item: SearchResult) {
+    setAutoOpenMtsVoucher(item.extension.toLowerCase() === "msg");
+    openPreview(item);
+  }
+
+  function printMtsVoucher(item: IndexedFile, defaultPageNumber = 1) {
+    setMtsPrintRequest({ item, pageInput: String(defaultPageNumber) });
+  }
+
+  function findAnexVoucherPage(item: IndexedFile, searchTerm: string, guestName = "") {
+    const pages = item.visualPages?.length ? item.visualPages : item.pages;
+    const compactQuery = normalize(searchTerm).replace(/\\s+/g, "");
+    const isReservationNumber = /^\\d{7,8}$/.test(compactQuery);
+    const nameTokens = normalize(guestName || searchTerm).split(/\\s+/).filter((token) => token.length > 1);
+    const matchIndex = pages.findIndex((page) => {
+      const normalizedPage = normalize(page);
+      if (isReservationNumber && normalizedPage.replace(/\\s+/g, "").includes(compactQuery)) return true;
+      return nameTokens.length >= 2 && nameTokens.every((token) => normalizedPage.includes(token));
+    });
+    return matchIndex >= 0 ? matchIndex + 1 : 1;
+  }
+
+  function findFunSunVoucherPage(item: IndexedFile, searchTerm: string, guestName = "") {
+    const pages = item.visualPages?.length ? item.visualPages : item.pages;
+    const compactQuery = normalize(searchTerm).replace(/\s+/g, "");
+    const isBookingNumber = /^\d{3,9}$/.test(compactQuery);
+    // Arrival reports can include punctuation and titles, e.g. "MIGULIN, Mr. KIRILL".
+    // Ignore titles and compare individual normalized name tokens.
+    const nameTokens = getSunSearchTokens(guestName || searchTerm);
+    const matchIndex = pages.findIndex((page) => {
+      const normalizedPage = normalize(page);
+      if (isBookingNumber && normalizedPage.replace(/\s+/g, "").includes(compactQuery)) return true;
+      const pageTokens = new Set(normalizedPage.split(/\s+/));
+      return nameTokens.length >= 2 && arrivalNameMatchesText(guestName || searchTerm, page);
+    });
+    // Do not silently print page 1 when the guest could not be located.
+    return matchIndex >= 0 ? matchIndex + 1 : 0;
+  }
+
+  async function executeFunSunVoucherPrint(item: IndexedFile, pageInput: string) {
+    const pageNumber = Number(pageInput.trim());
+    if (!Number.isInteger(pageNumber) || pageNumber < 1) {
+      window.alert("يرجى إدخال رقم صفحة صحيح يبدأ من 1.");
+      return;
+    }
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      window.alert("يرجى السماح بالنوافذ المنبثقة حتى تتمكن من طباعة فاوتشر FUN&SUN.");
+      return;
+    }
+    printWindow.document.write("<!doctype html><html><body style='font-family:Arial;padding:24px'>جارٍ تجهيز صفحة FUN&SUN للطباعة...</body></html>");
+    printWindow.document.close();
+    try {
+      if (item.extension.toLowerCase() !== "pdf") throw new Error("طباعة FUN&SUN المباشرة متاحة حالياً لملفات PDF الأصلية فقط.");
+      const pdfjs = await import("pdfjs-dist");
+      pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+      const pdf = await pdfjs.getDocument({ data: new Uint8Array(await item.file.arrayBuffer()) }).promise;
+      if (pageNumber > pdf.numPages) throw new Error("رقم الصفحة أكبر من عدد صفحات ملف FUN&SUN (" + pdf.numPages + ").");
+      const page = await pdf.getPage(pageNumber);
+      const viewport = page.getViewport({ scale: 1.8 });
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("تعذر تجهيز صفحة FUN&SUN للطباعة.");
+      canvas.width = Math.ceil(viewport.width);
+      canvas.height = Math.ceil(viewport.height);
+      await page.render({ canvasContext: context, viewport, canvas } as Parameters<typeof page.render>[0]).promise;
+      const pageImage = canvas.toDataURL("image/png");
+      printWindow.document.open();
+      printWindow.document.write(`<!doctype html>
+        <html lang="ar">
+          <head>
+            <meta charset="utf-8">
+            <title>FUN&amp;SUN Voucher - Page ${pageNumber}</title>
+            <style>
+              @page { size: A4; margin: 0; }
+              html, body { margin: 0; padding: 0; background: #fff; }
+              img { display: block; width: 210mm; height: 297mm; object-fit: contain; margin: 0 auto; }
+              @media screen { body { display:flex; justify-content:center; } img { max-width:100vw; height:auto; } }
+            </style>
+          </head>
+          <body>
+            <img src="${pageImage}" alt="FUN&amp;SUN Voucher page ${pageNumber}">
+            <script>
+              const image = document.querySelector("img");
+              image.addEventListener("load", () => { window.focus(); window.print(); }, { once: true });
+              image.addEventListener("error", () => { document.body.textContent = "تعذر تجهيز الصفحة للطباعة."; }, { once: true });
+            </script>
+          </body>
+        </html>`);
+      printWindow.document.close();
+    } catch (error) {
+      printWindow.close();
+      window.alert(error instanceof Error ? error.message : "حدث خطأ أثناء تجهيز صفحة FUN&SUN للطباعة.");
+    }
+  }
+
+  async function executeAnexVoucherPrint(item: IndexedFile, pageInput: string) {
+    const pageNumber = Number(pageInput.trim());
+    if (!Number.isInteger(pageNumber) || pageNumber < 1) {
+      window.alert("يرجى إدخال رقم صفحة صحيح يبدأ من 1.");
+      return;
+    }
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      window.alert("يرجى السماح بالنوافذ المنبثقة حتى تتمكن من طباعة الفاوتشر.");
+      return;
+    }
+    printWindow.document.write("<!doctype html><html><body style='font-family:Arial;padding:24px'>جارٍ تجهيز فاوتشر Anex للطباعة...</body></html>");
+    printWindow.document.close();
+    try {
+      if (item.extension.toLowerCase() !== "pdf") throw new Error("طباعة Anex المباشرة متاحة حالياً لملفات PDF الأصلية فقط.");
+      const pdfjs = await import("pdfjs-dist");
+      pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+      const pdf = await pdfjs.getDocument({ data: new Uint8Array(await item.file.arrayBuffer()) }).promise;
+      if (pageNumber > pdf.numPages) throw new Error("رقم الصفحة أكبر من عدد صفحات فاوتشر Anex (" + pdf.numPages + ").");
+      const page = await pdf.getPage(pageNumber);
+      const viewport = page.getViewport({ scale: 1.8 });
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("تعذر تجهيز صفحة فاوتشر Anex للطباعة.");
+      canvas.width = Math.ceil(viewport.width);
+      canvas.height = Math.ceil(viewport.height);
+      await page.render({ canvasContext: context, viewport, canvas } as Parameters<typeof page.render>[0]).promise;
+      const pageImage = canvas.toDataURL("image/png");
+      printWindow.document.open();
+      printWindow.document.write(`<!doctype html>
+        <html lang="ar">
+          <head>
+            <meta charset="utf-8">
+            <title>Anex Voucher - Page ${pageNumber}</title>
+            <style>
+              @page { size: A4; margin: 0; }
+              html, body { margin: 0; padding: 0; background: #fff; }
+              img { display: block; width: 210mm; height: 297mm; object-fit: contain; margin: 0 auto; }
+              @media screen { body { display:flex; justify-content:center; } img { max-width:100vw; height:auto; } }
+            </style>
+          </head>
+          <body>
+            <img src="${pageImage}" alt="Anex Voucher page ${pageNumber}">
+            <script>
+              const image = document.querySelector("img");
+              image.addEventListener("load", () => { window.focus(); window.print(); }, { once: true });
+              image.addEventListener("error", () => { document.body.textContent = "تعذر تجهيز الصفحة للطباعة."; }, { once: true });
+            </script>
+          </body>
+        </html>`);
+      printWindow.document.close();
+      setAnexPrintRequest(null);
+    } catch (error) {
+      printWindow.close();
+      window.alert(error instanceof Error ? error.message : "حدث خطأ أثناء تجهيز فاوتشر Anex للطباعة.");
+    }
+  }
+
+  async function executeMtsVoucherPrint(item: IndexedFile, pageInput: string) {
+    const pageNumber = Number(pageInput.trim());
+    if (!Number.isInteger(pageNumber) || pageNumber < 1) {
+      window.alert("يرجى إدخال رقم صفحة صحيح يبدأ من 1.");
+      return;
+    }
+
+    // Open synchronously from the click to avoid popup blocking during PDF preparation.
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      window.alert("يرجى السماح بالنوافذ المنبثقة حتى تتمكن من طباعة الفاوتشر.");
+      return;
+    }
+    printWindow.document.write("<!doctype html><html><body style='font-family:Arial;padding:24px'>جارٍ تجهيز الصفحة المطلوبة للطباعة...</body></html>");
+    printWindow.document.close();
+
+    try {
+      let voucherBlob: Blob | null = null;
+      if (item.extension.toLowerCase() === "pdf") {
+        voucherBlob = item.file;
+      } else if (item.extension.toLowerCase() === "msg") {
+        const { MsgReader } = await import("@kenjiuno/msgreader-web-ng");
+        const reader = new MsgReader(await item.file.arrayBuffer());
+        const data = reader.getFileData();
+        const rows = Array.isArray(data.attachments) ? data.attachments as unknown as Array<Record<string, unknown>> : [];
+        const msgReader = reader as unknown as {
+          getAttachment: (attachment: unknown) => { fileName?: string; content: Uint8Array };
+        };
+        for (const row of rows) {
+          const extracted = msgReader.getAttachment(row);
+          const name = String(extracted.fileName || row.fileName || row.name || "");
+          const declaredMime = String(row.attachMimeTag || "").split(";")[0].trim().toLowerCase();
+          if (!/guest\s*voucher/i.test(name)) continue;
+          if (!name.toLowerCase().endsWith(".pdf") && declaredMime !== "application/pdf") continue;
+          voucherBlob = new Blob([new Uint8Array(extracted.content).buffer as ArrayBuffer], { type: "application/pdf" });
+          break;
+        }
+      }
+      if (!voucherBlob) throw new Error("لم يتم العثور على ملف PDF Voucher داخل حجز MTS.");
+
+      const pdfjs = await import("pdfjs-dist");
+      pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+      const pdf = await pdfjs.getDocument({ data: new Uint8Array(await voucherBlob.arrayBuffer()) }).promise;
+      if (pageNumber > pdf.numPages) {
+        throw new Error("رقم الصفحة أكبر من عدد صفحات الفاوتشر (" + pdf.numPages + ").");
+      }
+
+      const page = await pdf.getPage(pageNumber);
+      const viewport = page.getViewport({ scale: 1.8 });
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("تعذر تجهيز صفحة الفاوتشر للطباعة.");
+      canvas.width = Math.ceil(viewport.width);
+      canvas.height = Math.ceil(viewport.height);
+      await page.render({ canvasContext: context, viewport, canvas } as Parameters<typeof page.render>[0]).promise;
+      const pageImage = canvas.toDataURL("image/png");
+
+      printWindow.document.open();
+      printWindow.document.write(`<!doctype html>
+        <html lang="ar">
+          <head>
+            <meta charset="utf-8">
+            <title>MTS Guest Voucher - Page ${pageNumber}</title>
+            <style>
+              @page { size: A4; margin: 0; }
+              html, body { margin: 0; padding: 0; background: #fff; }
+              img { display: block; width: 210mm; height: 297mm; object-fit: contain; margin: 0 auto; }
+              @media screen { body { display:flex; justify-content:center; } img { max-width:100vw; height:auto; } }
+            </style>
+          </head>
+          <body>
+            <img src="${pageImage}" alt="MTS Guest Voucher page ${pageNumber}">
+            <script>
+              const image = document.querySelector("img");
+              image.addEventListener("load", () => {
+                window.focus();
+                window.print();
+              }, { once: true });
+              image.addEventListener("error", () => {
+                document.body.textContent = "تعذر تجهيز الصفحة للطباعة.";
+              }, { once: true });
+            </script>
+          </body>
+        </html>`);
+      printWindow.document.close();
+    } catch (error) {
+      printWindow.close();
+      window.alert(error instanceof Error ? error.message : "حدث خطأ أثناء تجهيز صفحة الفاوتشر للطباعة.");
+    }
   }
 
   async function removeSavedFolder() {
-    if (!window.confirm("هل تريد حذف نسخة المجلد المحفوظة من هذا المتصفح؟ لن يتم حذف الملفات الأصلية من جهازك.")) return;
-    try {
-      await clearGuestFiles();
-      await refreshBrowserStorage();
-      localStorage.removeItem(GUEST_STATE_KEY);
-      setFiles([]);
-      setQuery("");
-      setSelected(null);
-      setCurrentPage(1);
-      setFolderName("");
-      setWarnings([]);
-      setStorageMessage("تم حذف المجلد المحفوظ من المتصفح.");
-    } catch {
-      setStorageMessage("تعذر حذف المجلد المحفوظ. حاول مرة أخرى.");
-    }
+    if (!window.confirm("هل تريد إلغاء ربط مجلد الحجوزات؟ لن يتم حذف الملفات الأصلية من جهازك.")) return;
+    await window.desktopBridge?.unwatchFolder();
+    await window.desktopBridge?.clearSavedFolderPath();
+    setFiles([]);
+    setQuery("");
+    setSelected(null);
+    setCurrentPage(1);
+    setFolderName("");
+    setNativeFolderPath("");
+    localStorage.removeItem(NATIVE_FOLDER_KEY);
+    localStorage.removeItem(GUEST_STATE_KEY);
+    setWarnings([]);
+    setStorageMessage("تم إلغاء ربط مجلد الحجوزات. الملفات الأصلية لم يتم تغييرها.");
   }
 
   function printMsgImage(attachment: MsgAttachmentPreview) {
@@ -1310,7 +2882,9 @@ export default function GuestNameExtractorPage() {
   }
 
   async function copyGuestDetails(person: { name: string; dob: string }) {
-    const value = [person.name, person.dob === "لم يُعثر عليه" ? "" : person.dob].filter(Boolean).join(" - ");
+    const value = /^\(Age:\s*\d+\)$/i.test(person.dob)
+      ? person.name + " " + person.dob
+      : [person.name, person.dob === "لم يُعثر عليه" ? "" : person.dob].filter(Boolean).join(" - ");
     try {
       await navigator.clipboard.writeText(value);
       setDiagnosticStatus(`تم نسخ بيانات ${person.name}.`);
@@ -1320,6 +2894,24 @@ export default function GuestNameExtractorPage() {
   }
 
   const [diagnosticStatus, setDiagnosticStatus] = useState("");
+
+  async function copyArrivalNumbers(kind: "room" | "confirmation") {
+    const values = arrivals
+      .map((item) => kind === "room" ? item.roomNo : item.confirmationNo)
+      .filter(Boolean);
+    if (!values.length) {
+      setMultipleCopyStatus("لا توجد بيانات في arr.pdf لنسخها.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(values.join(", "));
+      setMultipleCopyStatus(kind === "room"
+        ? `تم نسخ ${values.length} رقم غرفة. يمكنك لصقها في البحث المتعدد.`
+        : `تم نسخ ${values.length} رقم تأكيدي. يمكنك لصقها في البحث المتعدد.`);
+    } catch {
+      setMultipleCopyStatus("تعذر النسخ. تأكد من السماح للتطبيق بالوصول إلى الحافظة.");
+    }
+  }
 
   async function copyPageDiagnostics() {
     if (!selected) return;
@@ -1442,35 +3034,20 @@ export default function GuestNameExtractorPage() {
 
   return (
     <div className="page" dir="rtl">
-      <div
-        title="المساحة المستخدمة من حصة التخزين التي يخصصها المتصفح لهذا الموقع"
-        aria-label={browserStorage ? `استخدام التخزين: ${formatStorageMB(browserStorage.usage)} من ${formatStorageMB(browserStorage.quota)}` : "تعذر قراءة سعة التخزين"}
-        style={{
-          position: "fixed", top: 8, left: 10, zIndex: 1000,
-          padding: "4px 7px", borderRadius: 6,
-          background: "rgba(255,255,255,0.92)", border: "1px solid #d7dee8",
-          color: "#526174", fontSize: 10, lineHeight: 1.2,
-          direction: "ltr", fontVariantNumeric: "tabular-nums",
-          boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
-        }}
-      >
-        {browserStorage
-          ? `${formatStorageMB(browserStorage.usage)} / ${formatStorageMB(browserStorage.quota)}`
-          : "Storage: N/A"}
-      </div>
       <header className="hero">
         <p className="eyebrow">Long Beach Resort · Hotel Tools</p>
         <h1>Guest Name Extractor</h1>
-        <p>ابحث داخل ملفات الحجوزات، اعرض المستند الأصلي واطبعه، واستخرج أسماء النزلاء وتواريخ الميلاد من الصفحة المعروضة.</p>
+        <p>ابحث عن ملف الحجز برقم الحجز أو الرقم التأكيدي أو اسم النزيل أو الشركة، واستخرج أسماء جميع النزلاء وتواريخ ميلادهم تلقائياً.</p>
       </header>
       <section className="panel">
         <div className="section-heading">
           <div><h2>1. اختيار مجلد الحجوزات بالكامل</h2>
-            <p className="muted">اختر المجلد الرئيسي. تتم قراءة الملفات محلياً داخل المتصفح دون رفعها إلى الخادم.</p></div>
-          <button type="button" className="add-button" onClick={() => inputRef.current?.click()} disabled={busy}>
-            {busy ? "جارٍ فحص المجلد..." : "اختيار مجلد"}
+            <p className="muted">اربط مجلد الحجوزات الأصلي مرة واحدة. في نسخة Windows تتم قراءة الملفات مباشرة من مكانها دون رفعها أو نسخها إلى ذاكرة المتصفح.</p></div>
+          <button type="button" className="add-button" onClick={() => void chooseNativeFolder()} disabled={busy}>
+            {busy ? "جارٍ فحص المجلد..." : isDesktop ? (nativeFolderPath ? "تغيير مجلد الحجوزات" : "ربط مجلد Windows") : "اختيار مجلد"}
           </button>
-          {files.length > 0 && <button type="button" className="add-button" onClick={() => void removeSavedFolder()} disabled={busy}>حذف المجلد المحفوظ</button>}
+          {isDesktop && nativeFolderPath && <button type="button" className="add-button" onClick={() => void scanNativeFolder(nativeFolderPath)} disabled={busy}>فحص التحديثات</button>}
+          {files.length > 0 && <button type="button" className="add-button" onClick={() => void removeSavedFolder()} disabled={busy}>إلغاء ربط المجلد</button>}
           <button type="button" className="add-button" onClick={() => arrivalInputRef.current?.click()} disabled={arrivalBusy}>
             {arrivalBusy ? "جارٍ قراءة التقرير..." : arrivals.length ? "استبدال تقرير arr.pdf" : "رفع تقرير arr.pdf"}
           </button>
@@ -1481,9 +3058,10 @@ export default function GuestNameExtractorPage() {
             {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
             onChange={(event) => { void scanFolder(event.currentTarget.files); event.currentTarget.value = ""; }} />
         </div>
-        {folderName && <div className="filename">المجلد: {folderName}</div>}
+        {folderName && <div className="filename" dir="ltr">المجلد المرتبط: {folderName}</div>}
         <p className="saved-hint" role="status">{storageMessage}</p>
         {arrivalReportName && <div className="filename">تقرير الوصول: {arrivalReportName} · {arrivals.length.toLocaleString("en-US")} حجز</div>}
+        {arrivals.length > 0 && <div className="filename">بيانات الوصول المحفوظة: {arrivals.length.toLocaleString("en-US")} حجز</div>}
         {arrivalStatus && <p className="saved-hint" role="status">{arrivalStatus}</p>}
         {busy && <div className="folder-progress" role="status">
           <div className="progress-track"><span style={{ width: progress.total ? (progress.done / progress.total * 100) + "%" : "0%" }} /></div>
@@ -1495,8 +3073,132 @@ export default function GuestNameExtractorPage() {
 
       {files.length > 0 && <>
         <section className="panel">
+          <div className="section-heading" style={{ marginBottom: 12 }}>
+            <h2 style={{ margin: 0 }}>وضع العرض</h2>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button type="button" className="add-button" aria-pressed={viewMode === "single"} onClick={() => setViewMode("single")}
+                style={viewMode === "single" ? { background: "#1769aa", color: "#fff" } : undefined}>Single View</button>
+              <button type="button" className="add-button" aria-pressed={viewMode === "multiple"} onClick={() => setViewMode("multiple")}
+                style={viewMode === "multiple" ? { background: "#1769aa", color: "#fff" } : undefined}>Multiple View</button>
+            </div>
+          </div>
+          <h2>فلتر مواعيد الوصول من / إلى</h2>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 10 }}>
+            <label style={{ display: "grid", gap: 5 }}>الشركة
+              <select value={arrivalCompanyFilter} onChange={(event) => setArrivalCompanyFilter(event.target.value)}
+                style={{ minHeight: 40, border: "1px solid #cbd6e2", borderRadius: 8, padding: 8, font: "inherit" }}>
+                <option value="all">كل الشركات</option>
+                {arrivalCompanyOptions.map((company) => <option key={company} value={company}>{company}</option>)}
+              </select>
+            </label>
+            <label style={{ display: "grid", gap: 5 }}>من
+              <input type="time" value={arrivalFrom} onChange={(event) => setArrivalFrom(event.target.value)}
+                style={{ minHeight: 40, border: "1px solid #cbd6e2", borderRadius: 8, padding: 8 }} />
+            </label>
+            <label style={{ display: "grid", gap: 5 }}>إلى
+              <input type="time" value={arrivalTo} onChange={(event) => setArrivalTo(event.target.value)}
+                style={{ minHeight: 40, border: "1px solid #cbd6e2", borderRadius: 8, padding: 8 }} />
+            </label>
+          </div>
+          {(arrivalFrom || arrivalTo || arrivalCompanyFilter !== "all") && <div style={{ marginTop: 8, fontSize: 12, color: "#64748b" }}>
+            الغرف المطابقة ({arrivalTimeMatches.length}): {arrivalTimeMatches.length
+              ? arrivalTimeMatches.map((item) => item.roomNo + " (" + item.arrivalTime + ")").join("، ")
+              : "لا توجد غرف مطابقة للفترة والشركة المحددتين"}
+          </div>}
+        </section>
+        {viewMode === "multiple" && <section className="panel">
+          <h2>البحث المتعدد</h2>
+          <p className="muted">هذا البحث مستقل عن Single View. اكتب أرقام الغرف أو الأرقام التأكيدية أو أسماء النزلاء، وافصل بينها بفاصلة، ثم اضغط «بحث» لعرض النتائج.</p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, margin: "10px 0" }}>
+            <button type="button" className="add-button" onClick={() => void runMultipleSearch()} disabled={!multipleDraftQuery.trim() || busy || multipleSearching}>
+              {multipleSearching ? <><span className="search-spinner" aria-hidden="true" /> جارٍ البحث...</> : "بحث"}
+            </button>
+            <button type="button" className="add-button" onClick={() => { setMultipleDraftQuery(""); setMultipleSearchQuery(""); setMultipleCardsData([]); }} disabled={!multipleDraftQuery && !multipleSearchQuery && !multipleCardsData.length}>مسح البحث</button>
+            <button type="button" className="add-button" onClick={() => void copyArrivalNumbers("room")} disabled={!arrivals.length}>نسخ كل أرقام الغرف</button>
+            <button type="button" className="add-button" onClick={() => void copyArrivalNumbers("confirmation")} disabled={!arrivals.length}>نسخ كل الأرقام التأكيدية</button>
+          </div>
+          {multipleCopyStatus && <p className="saved-hint" role="status">{multipleCopyStatus}</p>}
+          {multipleSearching && <p className="saved-hint" role="status">جارٍ مطابقة الأسماء مع ملفات Guest Voucher وملفات الحجز...</p>}
+          <textarea value={multipleDraftQuery} onChange={(event) => setMultipleDraftQuery(event.target.value)}
+             placeholder="مثال: 0115, 209682, Fazliji, 0166" aria-label="البحث في عدة غرف وحجوزات"
+            rows={3} style={{ width: "100%", border: "1px solid #cbd6e2", borderRadius: 10, padding: 12, font: "inherit", resize: "vertical" }} />
+          <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 10, marginTop: 10 }}>
+            <label htmlFor="multiple-sort" style={{ fontSize: 13, color: "#526174" }}>ترتيب الغرف:</label>
+            <select id="multiple-sort" value={multipleSort} onChange={(event) => setMultipleSort(event.target.value as "input" | "company" | "room")}
+              style={{ minHeight: 38, border: "1px solid #cbd6e2", borderRadius: 8, padding: "4px 10px", font: "inherit" }}>
+              <option value="input">حسب ترتيب البحث</option>
+              <option value="company">حسب الشركة ثم رقم الغرفة</option>
+              <option value="room">حسب رقم الغرفة</option>
+            </select>
+          </div>
+          {multipleSearchQuery.trim() && <p className="saved-hint">عدد مربعات البحث بعد الفلترة: {multipleCards.length}</p>}
+          {multipleSearchQuery.trim() && multipleCards.length === 0 && <p className="empty-exclusions">لا توجد مربعات مطابقة للشركة المحددة أو لم يتم العثور على نتائج.</p>}
+          {multipleSearching && <p className="saved-hint" role="status">جارٍ مطابقة الأسماء مع ملفات Guest Voucher وملفات الحجز...</p>}
+          {multipleCards.length > 0 && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,390px),1fr))", gap: 12, marginTop: 14 }}>
+            {multipleCards.map((card) => {
+              const isGreen = greenCards.includes(card.key);
+              return <article key={card.key} className="folder-result" style={{
+                minWidth: 0, background: isGreen ? "#e8f5e9" : undefined,
+                border: isGreen ? "1px solid #81c784" : undefined
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <strong>{card.arrival?.name || card.file?.name || card.term}</strong>
+                  <button type="button" className="add-button" onClick={() => setGreenCards((current) =>
+                    current.includes(card.key) ? current.filter((key) => key !== card.key) : [...current, card.key]
+                  )}>{isGreen ? "اللون الافتراضي" : "تمييز بالأخضر"}</button>
+                </div>
+                {card.arrival
+                  ? <p className="muted">رقم الغرفة: {card.arrival.roomNo} · الرقم التأكيدي: {card.arrival.confirmationNo} · موعد الوصول: {card.arrival.arrivalTime}{card.arrival.company ? ` · الشركة: ${card.arrival.company}` : ""}</p>
+                  : <p className="muted">بحث: {card.term} · لم يتم العثور على سجل مطابق في arr.pdf</p>}
+                {card.file ? <>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "8px 0" }}>
+                    {isMtsIndexedFile(card.file) ? <>
+                      {card.file.extension.toLowerCase() === "msg" && <button type="button" className="add-button" onClick={() => void openMtsOutlookFile(card.file!)}>فتح ملف Outlook</button>}
+                      <button type="button" className="add-button" onClick={() => openMtsVoucher({ ...(card.voucherFile || card.file)!, matchedPages: [1] })}>استعراض الفاوتشر</button>
+                      <button type="button" className="add-button" onClick={() => void printMtsVoucher((card.voucherFile || card.file)!, card.voucherPageNumber || 1)}>طباعة الفاوتشر</button>
+                    </> : isFunSunIndexedFile(card.file) && card.file.extension.toLowerCase() === "pdf" ? <>
+                      <button type="button" className="add-button" onClick={() => {
+                        const pageNumber = findFunSunVoucherPage(card.file!, card.term, card.arrival?.name || "");
+                        if (!pageNumber) {
+                          window.alert("لم أتمكن من تحديد صفحة النزيل بالاسم داخل هذا الملف. لن تتم طباعة الصفحة الأولى تلقائياً حتى لا تُطبع صفحة خاطئة.");
+                          return;
+                        }
+                        void executeFunSunVoucherPrint(card.file!, String(pageNumber));
+                      }}>طباعة</button>
+                      <button type="button" className="add-button" onClick={() => {
+                        const pageNumber = findFunSunVoucherPage(card.file!, card.term, card.arrival?.name || "");
+                        if (!pageNumber) {
+                          window.alert("لم أتمكن من تحديد صفحة النزيل بالاسم داخل هذا الملف.");
+                          return;
+                        }
+                        openPreview({ ...card.file!, matchedPages: [pageNumber] });
+                      }}>معاينة صفحة الفاوتشر</button>
+                    </> : isAnexIndexedFile(card.file) && card.file.extension.toLowerCase() === "pdf" ? <>
+                      <button type="button" className="add-button" onClick={() => void executeAnexVoucherPrint(card.file!, String(findAnexVoucherPage(card.file!, card.term, card.arrival?.name || "")))}>طباعة</button>
+                      <button type="button" className="add-button" onClick={() => openPreview({ ...card.file!, matchedPages: [findAnexVoucherPage(card.file!, card.term, card.arrival?.name || "")] })}>معاينة صفحة الفاوتشر</button>
+                    </> : <>
+                      {isDesktop && <button type="button" className="add-button" onClick={() => void window.desktopBridge?.showInFolder(card.file!.path)}>مكان الملف</button>}
+                      <button type="button" className="add-button" onClick={() => openPreviewWithCapitalizer({ ...card.file!, matchedPages: [1] })}>معاينة واستخراج</button>
+                    </>}
+                  </div>
+                  <p className="folder-path" dir="ltr">{card.file.path}</p>
+                  <div style={{ marginTop: 10, padding: 10, borderRadius: 8, background: "rgba(255,255,255,.72)", border: "1px solid #dbe4ef" }}>
+                    <strong style={{ display: "block", marginBottom: 7 }}>الأسماء المستخرجة تلقائياً: {card.people.length}</strong>
+                    {card.people.length
+                      ? <div dir="ltr" style={{ display: "grid", gap: 5, textAlign: "left" }}>
+                          {card.people.map((person, personIndex) => <span key={person.name + personIndex} style={{ fontSize: 13 }}>{person.name}{/^\(Age:\s*\d+\)$/i.test(person.dob) ? " " + person.dob : person.dob ? " - " + person.dob : isSunInternationalIndexedFile(card.file) ? " -" : ""}</span>)}
+                        </div>
+                      : <span className="muted">لم يتم استخراج أسماء من الملف تلقائياً.</span>}
+                  </div>
+                </> : <p className="empty-exclusions">لم يتم العثور على ملف حجز مطابق لهذا البحث.</p>}
+              </article>;
+            })}
+          </div>}
+        </section>}
+        {viewMode === "single" && <>
+        <section className="panel">
           <h2>2. البحث بالاسم أو الشركة أو رقم الحجز أو رقم الغرفة أو الرقم التأكيدي</h2>
-          <p className="muted">ستظهر الملفات والصفحات المطابقة. عند رفع تقرير arr.pdf يمكنك أيضاً البحث برقم الغرفة أو الرقم التأكيدي لعرض اسم النزيل وميعاد وصوله.</p>
+          <p className="muted">بعد رفع تقرير arr.pdf يمكنك البحث برقم الغرفة أو الرقم التأكيدي؛ سيظهر اسم النزيل وميعاد وصوله والملفات التي تحتوي على اسمه.</p>
           <input value={query} onChange={(event) => setQuery(event.target.value)}
             placeholder="اكتب الاسم أو الشركة أو رقم الحجز أو رقم الغرفة أو الرقم التأكيدي..." aria-label="البحث بالاسم أو الشركة أو رقم الحجز أو رقم الغرفة أو الرقم التأكيدي"
             style={{ width: "100%", minHeight: 50, border: "1px solid #cbd6e2", borderRadius: 10, padding: "10px 14px", font: "inherit" }} />
@@ -1505,14 +3207,12 @@ export default function GuestNameExtractorPage() {
             <div><strong>{companies}</strong><span>شركة/مجلد شركة</span></div>
             <div><strong>{formatSize(totalSize)}</strong><span>إجمالي حجم الملفات</span></div>
           </div>
-          {query.trim() && <p className="saved-hint">عدد الصفحات/المستندات المطابقة: {results.length} · حجوزات تقرير الوصول المطابقة: {arrivalMatches.length}</p>}
+          {query.trim() && <p className="saved-hint">عدد الملفات المطابقة: {results.length} · حجوزات تقرير الوصول المطابقة: {arrivalMatches.length}</p>}
           {query.trim() && arrivalMatches.length > 0 && <div className="folder-results" style={{ marginTop: 14 }}>
-            {arrivalMatches.map((item) => (
-              <article className="folder-result" key={item.confirmationNo}>
-                <strong>{item.name}</strong>
-                <p className="muted">رقم الغرفة: {item.roomNo} · الرقم التأكيدي: {item.confirmationNo} · موعد الوصول: {item.arrivalTime}</p>
-              </article>
-            ))}
+            {arrivalMatches.map((item) => <article className="folder-result" key={item.confirmationNo}>
+              <strong>{item.name}</strong>
+              <p className="muted">رقم الغرفة: {item.roomNo} · الرقم التأكيدي: {item.confirmationNo} · موعد الوصول: {item.arrivalTime}</p>
+            </article>)}
           </div>}
         </section>
         {query.trim() && <section className="panel">
@@ -1523,30 +3223,30 @@ export default function GuestNameExtractorPage() {
                 <strong>{item.name}</strong>
                 <p className="muted">الشركة: {item.company}{item.month ? ` · الشهر: ${item.month}` : ""}{item.day ? ` · اليوم: ${item.day}` : ""} · النوع: {item.extension.toUpperCase()} · الحجم: {formatSize(item.size)}</p>
                 <p className="muted">الصفحات المطابقة: {item.matchedPages.join(", ")}</p>
-              </div><button type="button" className="add-button" onClick={() => openPreview(item)}>معاينة واستخراج</button></div>
+              </div><div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {isAnexIndexedFile(item) && item.extension.toLowerCase() === "pdf" ? <button type="button" className="add-button" onClick={() => void executeAnexVoucherPrint(item, String(findAnexVoucherPage(item, effectivePeopleQuery)))}>طباعة</button> : isDesktop && <button type="button" className="add-button" onClick={() => void window.desktopBridge?.showInFolder(item.path)}>مكان الملف</button>}
+                <button type="button" className="add-button" onClick={() => openPreviewWithCapitalizer(item)}>معاينة واستخراج</button>
+              </div></div>
               <p className="folder-path" dir="ltr">{item.path}</p>
               {(() => {
                 // Preview extracted guests for every company using the same
                 // company-specific parser used by the document preview.
-                const pagesToParse = item.matchedPages.length
-                  ? item.matchedPages.map((pageNumber) => item.pages[pageNumber - 1]).filter(Boolean)
-                  : [item.pages[0] || ""];
-                const guests = pagesToParse.flatMap((pageText) =>
-                  extractPeople(pageText, query, item.company),
-                );
-                const uniqueGuests = guests.filter((person, index, all) =>
-                  all.findIndex((candidate) =>
-                    normalize(candidate.name) === normalize(person.name)
-                    && normalize(candidate.dob) === normalize(person.dob),
-                  ) === index,
-                );
+                const guests = extractPeopleFromIndexedFile(item, effectivePeopleQuery);
+                const uniqueGuests = isW2mIndexedFile(item) || isSunInternationalIndexedFile(item)
+                  ? guests
+                  : guests.filter((person, index, all) =>
+                      all.findIndex((candidate) =>
+                        normalize(candidate.name) === normalize(person.name)
+                        && normalize(candidate.dob) === normalize(person.dob),
+                      ) === index,
+                    );
                 if (!uniqueGuests.length) return null;
                 return (
                   <div style={{ marginTop: 10, padding: 10, borderRadius: 8, background: "#f5f8fc", border: "1px solid #dbe4ef" }}>
                     <strong style={{ display: "block", marginBottom: 7 }}>الأسماء المستخرجة تلقائياً: {uniqueGuests.length}</strong>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "5px 12px" }} dir="ltr">
                       {uniqueGuests.map((person, index) => (
-                        <span key={index} style={{ fontSize: 13, textAlign: "left" }}>{person.name}{person.dob ? " - " + person.dob : ""}</span>
+                        <span key={index} style={{ fontSize: 13, textAlign: "left" }}>{person.name}{/^\(Age:\s*\d+\)$/i.test(person.dob) ? " " + person.dob : person.dob ? " - " + person.dob : ""}</span>
                       ))}
                     </div>
                   </div>
@@ -1555,6 +3255,7 @@ export default function GuestNameExtractorPage() {
             </article>
           ))}</div> : <p className="empty-exclusions">لا توجد ملفات تحتوي على كلمة البحث.</p>}
         </section>}
+        </>}
       </>}
 
       {selected && <section className="panel" aria-label="الأسماء وتواريخ الميلاد في الصفحة الحالية">
@@ -1562,7 +3263,7 @@ export default function GuestNameExtractorPage() {
           <h3>الأسماء وتواريخ الميلاد في الصفحة الحالية</h3>
           {extractedPeople.length ? <div className="folder-results">{extractedPeople.map((person, index) => (
             <div className="folder-result" key={index} dir="ltr" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, textAlign: "left", fontWeight: 700 }}>
-              <span>{selected.company.toLocaleLowerCase() === "easy jet" || !person.dob || person.dob === "لم يُعثر عليه" ? person.name : selected.company.toLocaleLowerCase() === "pegas" ? (person.name + " " + person.dob) : (person.name + " - " + person.dob)}</span>
+              <span>{selected.company.toLocaleLowerCase() === "easy jet" || !person.dob || person.dob === "لم يُعثر عليه" ? person.name : /^\(Age:\s*\d+\)$/i.test(person.dob) || selected.company.toLocaleLowerCase() === "pegas" ? (person.name + " " + person.dob) : (person.name + " - " + person.dob)}</span>
               <button type="button" onClick={() => void copyGuestDetails(person)} title={`نسخ بيانات ${person.name}`} aria-label={`نسخ بيانات ${person.name}`} style={{ flex: "0 0 34px", width: 34, height: 34, display: "inline-flex", alignItems: "center", justifyContent: "center", border: "1px solid #e45b65", borderRadius: 7, background: "#fff", color: "#d93645", cursor: "pointer" }}>
                 <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h3"/></svg>
               </button>
@@ -1669,12 +3370,95 @@ export default function GuestNameExtractorPage() {
           <div style={{ border: "1px solid #d7dee8", borderRadius: 10, overflow: "hidden", background: "#f3f5f7" }}>
             {selected.extension === "pdf" ? <iframe title="معاينة ملف PDF" src={previewUrl + "#page=" + currentPage + "&toolbar=1"}
               style={{ width: "100%", height: "75vh", maxHeight: 850, minHeight: 560, border: 0 }} /> :
-              <pre style={{ whiteSpace: "pre-wrap", overflow: "auto", maxHeight: 600, padding: 18, direction: "rtl", background: "white" }}>{pageText || "لا يوجد نص قابل للعرض."}</pre>}
+              ["png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff"].includes(selected.extension) ? (
+                <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: 420, maxHeight: "75vh", overflow: "auto", padding: 16, background: "#e9edf2" }}>
+                  <img src={previewUrl} alt={selected.name} style={{ display: "block", maxWidth: "100%", maxHeight: "72vh", objectFit: "contain", background: "white", boxShadow: "0 2px 12px rgba(0,0,0,.12)" }} />
+                </div>
+              ) : <pre style={{ whiteSpace: "pre-wrap", overflow: "auto", maxHeight: 600, padding: 18, direction: "rtl", background: "white" }}>{pageText || "لا يوجد نص قابل للعرض."}</pre>}
           </div>
         )}
           {diagnosticStatus && <p className="saved-hint" role="status">{diagnosticStatus}</p>}
           <p className="saved-hint">تنبيه: قد تتضمن البيانات المنسوخة أسماء النزلاء وأرقام جوازات السفر؛ راجعها واحذف أي بيانات لا ترغب في مشاركتها قبل إرسالها.</p>
       </section>}
+
+      {anexPrintRequest && <div role="dialog" aria-modal="true" aria-labelledby="anex-print-title"
+        style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(15,23,42,.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+        <section className="panel" style={{ width: "min(100%, 440px)", margin: 0, boxShadow: "0 20px 60px rgba(0,0,0,.25)" }}>
+          <h2 id="anex-print-title" style={{ marginTop: 0 }}>طباعة فاوتشر Anex</h2>
+          <p className="muted">تم تحديد صفحة الحجز تلقائياً. يمكنك تعديل رقم الصفحة قبل الطباعة.</p>
+          <label htmlFor="anex-print-page" style={{ display: "grid", gap: 6 }}>رقم الصفحة
+            <input id="anex-print-page" type="number" min="1" step="1" autoFocus
+              value={anexPrintRequest.pageInput}
+              onChange={(event) => setAnexPrintRequest((current) => current ? { ...current, pageInput: event.target.value } : null)}
+              onKeyDown={(event) => { if (event.key === "Enter") void executeAnexVoucherPrint(anexPrintRequest.item, anexPrintRequest.pageInput); }}
+              style={{ minHeight: 42, border: "1px solid #cbd6e2", borderRadius: 8, padding: "8px 12px", font: "inherit" }} />
+          </label>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+            <button type="button" className="add-button" onClick={() => setAnexPrintRequest(null)}>إلغاء</button>
+            <button type="button" className="add-button" onClick={() => void executeAnexVoucherPrint(anexPrintRequest.item, anexPrintRequest.pageInput)}>متابعة الطباعة</button>
+          </div>
+        </section>
+      </div>}
+      {mtsPrintRequest && <div role="dialog" aria-modal="true" aria-labelledby="mts-print-title"
+        style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(15,23,42,.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+        <section className="panel" style={{ width: "min(100%, 440px)", margin: 0, boxShadow: "0 20px 60px rgba(0,0,0,.25)" }}>
+          <h2 id="mts-print-title" style={{ marginTop: 0 }}>اختيار صفحة الفاوتشر للطباعة</h2>
+          <p className="muted">أدخل رقم الصفحة المطابقة للحجز من Guest Voucher. يمكنك تعديل الرقم المقترح.</p>
+          <label htmlFor="mts-print-page" style={{ display: "grid", gap: 6 }}>رقم الصفحة
+            <input id="mts-print-page" type="number" min="1" step="1" autoFocus
+              value={mtsPrintRequest.pageInput}
+              onChange={(event) => setMtsPrintRequest((current) => current ? { ...current, pageInput: event.target.value } : null)}
+              onKeyDown={(event) => { if (event.key === "Enter") void executeMtsVoucherPrint(mtsPrintRequest.item, mtsPrintRequest.pageInput); }}
+              style={{ minHeight: 42, border: "1px solid #cbd6e2", borderRadius: 8, padding: "8px 12px", font: "inherit" }} />
+          </label>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+            <button type="button" className="add-button" onClick={() => setMtsPrintRequest(null)}>إلغاء</button>
+            <button type="button" className="add-button" onClick={() => void executeMtsVoucherPrint(mtsPrintRequest.item, mtsPrintRequest.pageInput)}>متابعة الطباعة</button>
+          </div>
+        </section>
+      </div>}
+
+
+      {showCapitalizer && <aside role="dialog" aria-label="تحويل أول حرف من كل كلمة إلى حرف كبير"
+        style={{ position: "fixed", left: capitalizerPosition.x, top: capitalizerPosition.y, zIndex: 1200,
+          width: "min(360px, calc(100vw - 24px))", padding: 12, border: "1px solid #9aaabd",
+          borderRadius: 12, background: "#fff", color: "#1e293b", boxShadow: "0 12px 36px rgba(15,23,42,.25)" }}>
+        <div onPointerDown={(event) => {
+          if ((event.target as HTMLElement).closest("button")) return;
+          const rect = event.currentTarget.parentElement!.getBoundingClientRect();
+          capitalizerDrag.current = { pointerId: event.pointerId, offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top };
+          event.currentTarget.setPointerCapture(event.pointerId);
+        }} onPointerMove={(event) => {
+          const drag = capitalizerDrag.current;
+          if (!drag || drag.pointerId !== event.pointerId) return;
+          setCapitalizerPosition({
+            x: Math.max(0, Math.min(window.innerWidth - 80, event.clientX - drag.offsetX)),
+            y: Math.max(0, Math.min(window.innerHeight - 80, event.clientY - drag.offsetY)),
+          });
+        }} onPointerUp={() => { capitalizerDrag.current = null; }}
+          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10,
+            cursor: "move", userSelect: "none", touchAction: "none", fontWeight: 700 }}>
+          <span>Capitalize First Letter</span>
+          <button type="button" aria-label="إغلاق أداة تحويل الأحرف" onClick={() => setShowCapitalizer(false)}
+            style={{ border: 0, borderRadius: 6, background: "#eef2f7", padding: "4px 9px", cursor: "pointer" }}>×</button>
+        </div>
+        <textarea value={capitalizerText} onChange={(event) => setCapitalizerText(event.target.value)}
+          placeholder="اكتب أو الصق النص هنا..."
+          aria-label="النص المراد تحويله"
+          rows={3} style={{ display: "block", width: "100%", boxSizing: "border-box", resize: "vertical",
+            border: "1px solid #cbd5e1", borderRadius: 8, padding: 9, font: "inherit" }} dir="auto" />
+        <div style={{ marginTop: 8, padding: 9, minHeight: 38, maxHeight: 120, overflow: "auto",
+          borderRadius: 8, background: "#f1f5f9", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }} dir="auto">
+          {capitalizerText.replace(/[\p{L}\p{N}]+/gu, (word) => word.charAt(0).toLocaleUpperCase() + word.slice(1).toLocaleLowerCase())}
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 7, marginTop: 9 }}>
+          <button type="button" className="add-button" onClick={() => setCapitalizerText("")}>مسح</button>
+          <button type="button" className="add-button" onClick={() => {
+            const converted = capitalizerText.replace(/[\p{L}\p{N}]+/gu, (word) => word.charAt(0).toLocaleUpperCase() + word.slice(1).toLocaleLowerCase());
+            void navigator.clipboard?.writeText(converted);
+          }}>نسخ النتيجة</button>
+        </div>
+      </aside>}
 
       {warnings.length > 0 && <section className="panel"><h2>ملفات تعذرت قراءتها</h2>
         <ul className="steps">{warnings.map((path) => <li key={path} dir="ltr">{path}</li>)}</ul></section>}
