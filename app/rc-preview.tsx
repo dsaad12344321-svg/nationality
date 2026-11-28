@@ -98,6 +98,12 @@ export default function RCPreview() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const inhInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    folderInputRef.current?.setAttribute("webkitdirectory", "");
+    folderInputRef.current?.setAttribute("directory", "");
+  }, []);
 
   const pdfEntries = useMemo(
     () => registrations.entries.filter((entry) => entry.name.toLowerCase().endsWith(".pdf")),
@@ -143,20 +149,30 @@ export default function RCPreview() {
   }
 
   async function chooseFolder() {
-    if (!window.desktopBridge) {
-      setMessage("ربط مجلد الملفات متاح من تطبيق سطح المكتب فقط.");
-      return;
-    }
+    if (!window.desktopBridge) { folderInputRef.current?.click(); return; }
     try {
       const path = await window.desktopBridge.selectFolder();
       if (!path) return;
       await setFolderPath("registration", path);
-      setResults([]);
-      setSelected(null);
+      setResults([]); setSelected(null); setPdfData(null);
       setMessage("تم ربط مجلد نماذج التسجيل وتحديث فهرس الملفات.");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "تعذر ربط المجلد.");
-    }
+    } catch (error) { setMessage(error instanceof Error ? error.message : "تعذر ربط المجلد."); }
+  }
+
+  async function handleBrowserFolder(files: File[]) {
+    if (!files.length) return;
+    setBusy(true); setMessage("جارٍ حفظ ملفات مجلد Registration Card داخل المتصفح...");
+    try {
+      const entries = await setFolderFiles("registration", files);
+      setResults([]); setSelected(null); setPdfData(null); setPageCount(0);
+      setMessage("تم حفظ " + entries.length + " ملفًا داخل المتصفح. ستظل متاحة بعد إغلاق الصفحة وإعادة فتحها على هذا المتصفح.");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "تعذر حفظ ملفات المجلد. تحقق من مساحة التخزين المتاحة."); }
+    finally { setBusy(false); }
+  }
+
+  function closePreview() {
+    setSelected(null); setPdfData(null); setPageCount(0);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function searchRooms() {
@@ -195,6 +211,7 @@ export default function RCPreview() {
       const pdf = await pdfjs.getDocument({ data: bytes.slice() }).promise;
       setPageCount(pdf.numPages);
       setMessage("تم فتح الملف. اختر الصفحة التي تريد معاينتها أو طباعتها.");
+      window.setTimeout(() => previewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "تعذر فتح ملف PDF.");
     } finally {
@@ -270,9 +287,10 @@ export default function RCPreview() {
       </div>
       <div className="upload" style={{ marginTop: 12 }}>
         <label>مجلد نماذج التسجيل PDF</label>
-        <button type="button" className="add-button" onClick={chooseFolder}>اختيار / تغيير مجلد النماذج</button>
-        {(typeof window === "undefined" || !window.desktopBridge) && <><input ref={folderInputRef} type="file" accept=".pdf,application/pdf" multiple onChange={(event) => { const files = Array.from(event.target.files || []); if (files.length) { setFolderFiles("registration", files); setResults([]); setSelected(null); setPdfData(null); setMessage("تم تحميل " + files.length + " ملفًا من المتصفح. ستظل الملفات متاحة خلال جلسة الصفحة الحالية."); } event.target.value = ""; }} style={{ display: "none" }} /><label className="saved-hint">في المتصفح حدد ملفات Registration Card PDF من جهازك (يمكن تحديد عدة ملفات).</label></>}
-        <p className="saved-hint">{registrations.path ? registrations.path : "لم يتم ربط مجلد نماذج التسجيل بعد."}</p>
+        <button type="button" className="add-button" onClick={chooseFolder} disabled={busy}>اختيار / تغيير مجلد النماذج</button>
+        <input ref={folderInputRef} type="file" accept=".pdf,application/pdf" multiple onChange={(event) => { void handleBrowserFolder(Array.from(event.target.files || [])); event.target.value = ""; }} style={{ display: "none" }} />
+        <label className="saved-hint">اختر المجلد كاملًا؛ سيتم حفظ ملفات PDF داخله محليًا في المتصفح واستعادتها تلقائيًا عند العودة.</label>
+        <p className="saved-hint">{registrations.path ? registrations.path : "لم يتم اختيار مجلد نماذج التسجيل بعد."}</p>
         <p className="saved-hint">{registrations.loading ? "جارٍ فهرسة الملفات..." : "ملفات PDF في الفهرس: " + pdfEntries.length}</p>
         <button type="button" className="add-button" disabled={registrations.loading || !registrations.path || typeof window === "undefined" || !window.desktopBridge} onClick={() => void refreshFolder("registration").then(() => setMessage("تم تحديث فهرس ملفات PDF.")).catch(() => setMessage("تعذر تحديث الفهرس."))}>تحديث الفهرس</button>
       </div>
@@ -329,10 +347,13 @@ export default function RCPreview() {
         </div>
       )}
       {selected && pdfData && (
-        <div className="towel-results">
+        <div className="towel-results" ref={previewRef} style={{ scrollMarginTop: 20 }}>
           <div className="section-heading">
             <div><h3 dir="ltr">{selected.name}</h3><p className="muted">عدد الصفحات: {pageCount}</p></div>
-            <button type="button" className="add-button" onClick={printCurrentPage}>طباعة الصفحة {pageNumber}</button>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button type="button" className="add-button" onClick={printCurrentPage}>طباعة الصفحة {pageNumber}</button>
+              <button type="button" className="add-button" onClick={closePreview}>إغلاق المعاينة</button>
+            </div>
           </div>
           <div className="uploads" style={{ margin: "14px 0", alignItems: "center" }}>
             <button type="button" className="add-button" disabled={pageNumber <= 1} onClick={() => setPageNumber((value) => Math.max(1, value - 1))}>الصفحة السابقة</button>
