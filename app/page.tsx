@@ -2,6 +2,8 @@
 
 import { useEffect, useState, type ChangeEvent } from "react";
 import GuestNameExtractorPage from "./guest-name-extractor/page";
+import RCPreview from "./rc-preview";
+import { useFileLibrary } from "./file-library-provider";
 
 type Exclusion = { id: number; code: string; count: number };
 type ManagerRow = { room: string; towel: string; nationality: boolean; profile: string; isHouseUse: boolean };
@@ -14,6 +16,7 @@ const ACTIVE_TOOL_STORAGE_KEY = "nationality-report-active-tool-v1";
 const COUNTRIES = [["ES","إسبانيا"],["DE","ألمانيا"],["GB","بريطانيا"],["US","الولايات المتحدة"],["UA","أوكرانيا"],["RU","روسيا"],["BE","بلجيكا"],["PL","بولندا"],["CN","الصين"],["FR","فرنسا"],["IT","إيطاليا"],["IN","الهند"],["JP","اليابان"],["HR","كرواتيا"],["PK","باكستان"],["IR","إيران"],["IL","إسرائيل"],["SA","السعودية"],["IQ","العراق"],["LY","ليبيا"],["SD","السودان"],["PS","فلسطين"],["JO","الأردن"],["MA","المغرب"],["DZ","الجزائر"],["TN","تونس"],["MR","موريتانيا"],["BH","البحرين"],["EG","مصر"],["AE","الإمارات"],["KW","الكويت"],["QA","قطر"],["OM","عُمان"],["YE","اليمن"],["SY","سوريا"],["LB","لبنان"],["NL","هولندا"],["AT","النمسا"],["CH","سويسرا"],["SE","السويد"],["NO","النرويج"],["DK","الدنمارك"],["FI","فنلندا"],["CZ","التشيك"],["SK","سلوفاكيا"],["HU","المجر"],["RO","رومانيا"],["BG","بلغاريا"],["GR","اليونان"],["TR","تركيا"],["CA","كندا"],["AU","أستراليا"],["BR","البرازيل"],["MX","المكسيك"],["ZA","جنوب أفريقيا"]] as const;
 
 export default function Home() {
+  const { reservations: sharedReservations, registrations: sharedRegistrations, refreshFolder: refreshSharedFolder } = useFileLibrary();
   const [natFile, setNatFile] = useState<File | null>(null);
   const [manFile, setManFile] = useState<File | null>(null);
   const [roomInhFile, setRoomInhFile] = useState<File | null>(null);
@@ -25,7 +28,7 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [kind, setKind] = useState<"error" | "success" | "info">("info");
-  const [activeTool, setActiveTool] = useState<"nationality" | "towels" | "nationality-missing" | "missing-profile" | "manager-report" | "journal" | "rc-missing" | "guest-name-extractor">("nationality");
+  const [activeTool, setActiveTool] = useState<string>("nationality");
   const [managerTowelFile, setManagerTowelFile] = useState<File | null>(null);
   const [managerInhFile, setManagerInhFile] = useState<File | null>(null);
   const [managerNationalityFile, setManagerNationalityFile] = useState<File | null>(null);
@@ -70,6 +73,16 @@ export default function Home() {
   const [rcSummary, setRcSummary] = useState<{ totalRooms: number; matchedRooms: number; missingCount: number; pdfFiles: number; pdfRoomsCount: number } | null>(null);
   const [rcBusy, setRcBusy] = useState(false);
   const [rcMessage, setRcMessage] = useState("");
+  const [rcFolderPath, setRcFolderPath] = useState("");
+
+  useEffect(() => {
+    if (activeTool !== "rc-missing" || !window.desktopBridge) return;
+    let active = true;
+    void window.desktopBridge.getSavedFolderPath().then((savedPath) => {
+      if (active) setRcFolderPath(savedPath || "");
+    }).catch(() => { if (active) setRcFolderPath(""); });
+    return () => { active = false; };
+  }, [activeTool]);
 
   useEffect(() => {
     try {
@@ -109,9 +122,9 @@ export default function Home() {
     } catch { /* تجاهل الإضافات اليدوية غير الصالحة */ }
     try {
       const savedTool = localStorage.getItem(ACTIVE_TOOL_STORAGE_KEY);
-      const validTools = ["nationality", "towels", "nationality-missing", "missing-profile", "manager-report", "journal", "rc-missing", "guest-name-extractor"];
+      const validTools = ["nationality", "towels", "nationality-missing", "missing-profile", "manager-report", "journal", "rc-missing", "rc-preview", "guest-name-extractor"];
       if (savedTool && validTools.includes(savedTool)) {
-        setActiveTool(savedTool as "nationality" | "towels" | "nationality-missing" | "missing-profile" | "manager-report" | "journal" | "rc-missing" | "guest-name-extractor");
+        setActiveTool(savedTool);
       }
     } catch { /* تجاهل تعذر استعادة الأداة النشطة */ }
     setReady(true);
@@ -509,7 +522,7 @@ export default function Home() {
     link.remove();
     URL.revokeObjectURL(url);
   }
-  function extractPdfRoomsFromFiles(files: File[]) {
+  function extractPdfRoomsFromFiles(files: Array<{ name: string }>) {
     const rooms = new Set<string>();
     const pdfFiles = files.filter((file) => file.name.toLowerCase().endsWith(".pdf"));
     for (const file of pdfFiles) {
@@ -521,19 +534,91 @@ export default function Home() {
     return { rooms: [...rooms], pdfFiles: pdfFiles.length };
   }
 
+  function normalizeRCRoom(value: unknown) {
+    const room = String(value ?? "").trim();
+    return /^\d{3,4}$/.test(room) ? room.padStart(4, "0") : "";
+  }
+
+  async function extractRCRoomsFromArrivalPdf(file: File): Promise<string[]> {
+    const pdfjs = await import("pdfjs-dist");
+    pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+    const pdf = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+    const rooms = new Set<string>();
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+      const page = await pdf.getPage(pageNumber);
+      const content = await page.getTextContent();
+      const items = content.items.filter((item): item is typeof item & { str: string; transform: number[] } =>
+        "str" in item && "transform" in item && Boolean(item.str?.trim()),
+      ).map((item) => ({ x: item.transform[4], y: item.transform[5], text: item.str.trim() }));
+      const rows: { y: number; cells: { x: number; text: string }[] }[] = [];
+      for (const item of items) {
+        let row = rows.find((candidate) => Math.abs(candidate.y - item.y) <= 5);
+        if (!row) { row = { y: item.y, cells: [] }; rows.push(row); }
+        row.cells.push({ x: item.x, text: item.text });
+      }
+      const lines = rows.sort((a, b) => b.y - a.y).map((row) =>
+        row.cells.sort((a, b) => a.x - b.x).map((cell) => cell.text).join(" ").replace(/\s+/g, " ").trim(),
+      );
+      const isRoomLine = (line: string) => {
+        const match = line.match(/^(\d{3,5})\s+(.+)$/);
+        return Boolean(match && match[2].includes(",") && !/^\d{5,9}\b/.test(match[2]));
+      };
+      for (let index = 0; index < lines.length; index++) {
+        const match = lines[index].match(/^(\d{3,5})\s+(.+)$/);
+        if (!match || !match[2].includes(",")) continue;
+        let confirmation = false;
+        for (let next = index + 1; next < Math.min(index + 5, lines.length); next++) {
+          if (isRoomLine(lines[next])) break;
+          if (/^\s*\d{5,9}(?=\s|$)/.test(lines[next])) confirmation = true;
+          if (confirmation) break;
+        }
+        if (confirmation) {
+          const room = normalizeRCRoom(match[1]);
+          if (room) rooms.add(room);
+        }
+      }
+    }
+    return [...rooms];
+  }
+
+  async function getRCPdfFileNames() {
+    const manualNames = rcPdfFiles.map((file) => file.name);
+    let folderNames: string[] = [];
+    let folderPath = rcFolderPath;
+    if (window.desktopBridge) {
+      if (!folderPath) folderPath = await window.desktopBridge.getSavedFolderPath().catch(() => "");
+      if (folderPath) {
+        setRcFolderPath(folderPath);
+        const entries = await window.desktopBridge.listFolderFiles(folderPath);
+        folderNames = entries.filter((entry) => entry.name.toLowerCase().endsWith(".pdf")).map((entry) => entry.name);
+      }
+    }
+    return { names: [...folderNames, ...manualNames], folderPath };
+  }
+
   async function detectRCMissing() {
-    if (!rcResFile || !rcPdfFiles.length) { setRcMessage("من فضلك اختر تقرير RES_DETAIL.xml وحدد ملفات PDF."); return; }
-    if (!rcResFile.name.toLowerCase().endsWith(".xml") || rcPdfFiles.some((file) => !file.name.toLowerCase().endsWith(".pdf"))) { setRcMessage("تأكد من اختيار تقرير XML وملفات PDF فقط."); return; }
+    if (!rcResFile) { setRcMessage("من فضلك اختر تقرير الوصول بصيغة RES_DETAIL.xml أو arr.pdf."); return; }
+    const reportExtension = rcResFile.name.split(".").pop()?.toLowerCase();
+    if (reportExtension !== "xml" && reportExtension !== "pdf") { setRcMessage("تقرير الوصول يجب أن يكون بصيغة XML أو PDF."); return; }
+    if (rcPdfFiles.some((file) => !file.name.toLowerCase().endsWith(".pdf"))) { setRcMessage("اختر ملفات PDF فقط."); return; }
     setRcBusy(true);
-    setRcMessage("جارٍ استخراج أرقام الغرف من أسماء ملفات PDF...");
+    setRcMessage("جارٍ قراءة تقرير الوصول ومجلد الحجوزات...");
     setRcMissingRooms([]);
     setRcSummary(null);
     try {
-      const { rooms, pdfFiles } = extractPdfRoomsFromFiles(rcPdfFiles);
-      if (!pdfFiles) throw new Error("لم يتم العثور على ملفات PDF صالحة.");
-      setRcMessage("تم اختيار " + pdfFiles + " ملف PDF. جارٍ مقارنتها بتقرير الوصول...");
+      const { names, folderPath } = await getRCPdfFileNames();
+      const { rooms, pdfFiles } = extractPdfRoomsFromFiles(names.map((name) => ({ name })));
+      if (!pdfFiles) throw new Error("لم يتم العثور على ملفات PDF في مجلد الحجوزات المرتبط أو الملفات المحددة يدويًا.");
       const data = new FormData();
-      data.append("resFile", rcResFile);
+      if (reportExtension === "xml") {
+        data.append("resFile", rcResFile);
+      } else {
+        setRcMessage("جارٍ استخراج أرقام الغرف من arr.pdf...");
+        const reportRooms = await extractRCRoomsFromArrivalPdf(rcResFile);
+        if (!reportRooms.length) throw new Error("لم يتم العثور على غرف في arr.pdf. تأكد أنه تقرير الوصول المعتاد الذي يحتوي على رقم الغرفة واسم النزيل ورقم التأكيد.");
+        data.append("reportRooms", JSON.stringify(reportRooms));
+        data.append("reportFileName", rcResFile.name);
+      }
       data.append("pdfRooms", JSON.stringify(rooms));
       data.append("pdfFiles", String(pdfFiles));
       const response = await fetch("/api/rc-missing", { method: "POST", body: data });
@@ -541,7 +626,7 @@ export default function Home() {
       if (!response.ok) throw new Error(result.error || "تعذر فحص الملفات.");
       setRcMissingRooms(result.missingRooms || []);
       setRcSummary({ totalRooms: result.totalRooms, matchedRooms: result.matchedRooms, missingCount: result.missingCount, pdfFiles: result.pdfFiles, pdfRoomsCount: result.pdfRoomsCount });
-      setRcMessage("اكتمل الفحص بنجاح.");
+      setRcMessage("اكتمل الفحص بنجاح. " + (folderPath ? "تمت قراءة ملفات PDF من مجلد الحجوزات المرتبط." : "تمت قراءة ملفات PDF المختارة يدويًا."));
     } catch (error) {
       setRcMessage(error instanceof Error ? error.message : "حدث خطأ أثناء فحص RC Missing.");
     } finally { setRcBusy(false); }
@@ -627,14 +712,25 @@ export default function Home() {
     <main className="page">
       <header className="hero">
         <p className="eyebrow">أداة التقارير الفندقية</p>
-        <h1>{activeTool === "nationality" ? "التقرير اليومي للجنسيات" : activeTool === "towels" ? "Missing Towel Detector" : activeTool === "nationality-missing" ? "Nationality missing detector" : activeTool === "missing-profile" ? "Missing Profile Detector" : activeTool === "manager-report" ? "Manager Report" : activeTool === "guest-name-extractor" ? "Guest Name Extractor" : activeTool === "rc-missing" ? "RC Missing" : "Journal Detector"}</h1>
-        <p>{activeTool === "nationality" ? "حوّل ملفات nat.xml وman.xml إلى تقرير Excel، ويمكن إضافة Guests INH - By Room لإنشاء تبويب تفاصيل الغرف." : activeTool === "towels" ? "ارفع تقرير الغرف لاستخراج أرقام الغرف التي لا تحتوي على Towel Card." : activeTool === "nationality-missing" ? "ارفع Guest INH By Nationality لاستخراج أرقام الغرف التي لا تحتوي على كود جنسية." : activeTool === "missing-profile" ? "قارن عدد Adults + Children بعدد الأسماء المسجلة في Main Profile وAccompanying Names." : activeTool === "manager-report" ? "تقرير موحد للغرف التي بها نقص في كروت الفوط أو الجنسية أو ملفات النزلاء." : activeTool === "guest-name-extractor" ? "اختر مجلد الحجوزات للبحث داخل ملفات PDF وWord وOutlook عن اسم النزيل أو الشركة." : activeTool === "rc-missing" ? "قارن غرف تقرير RES_DETAIL مع أرقام الغرف الموجودة في أسماء ملفات PDF داخل ملف ZIP، واعرض الغرف التي لا يوجد لها PDF." : "ارفع Journal by Cashier and Transaction Code لاستخراج الحركات، أو RES_DETAIL لاستخراج غرف الوصول التي لديها 1012 Fixed Charges."}</p>
+        <h1>{activeTool === "nationality" ? "التقرير اليومي للجنسيات" : activeTool === "towels" ? "Missing Towel Detector" : activeTool === "nationality-missing" ? "Nationality missing detector" : activeTool === "missing-profile" ? "Missing Profile Detector" : activeTool === "manager-report" ? "Manager Report" : activeTool === "guest-name-extractor" ? "Guest Name Extractor" : activeTool === "rc-missing" ? "RC Missing" : activeTool === "rc-preview" ? "RC Preview" : "Journal Detector"}</h1>
+        <p>{activeTool === "nationality" ? "حوّل ملفات nat.xml وman.xml إلى تقرير Excel، ويمكن إضافة Guests INH - By Room لإنشاء تبويب تفاصيل الغرف." : activeTool === "towels" ? "ارفع تقرير الغرف لاستخراج أرقام الغرف التي لا تحتوي على Towel Card." : activeTool === "nationality-missing" ? "ارفع Guest INH By Nationality لاستخراج أرقام الغرف التي لا تحتوي على كود جنسية." : activeTool === "missing-profile" ? "قارن عدد Adults + Children بعدد الأسماء المسجلة في Main Profile وAccompanying Names." : activeTool === "manager-report" ? "تقرير موحد للغرف التي بها نقص في كروت الفوط أو الجنسية أو ملفات النزلاء." : activeTool === "guest-name-extractor" ? "اختر مجلد الحجوزات للبحث داخل ملفات PDF وWord وOutlook عن اسم النزيل أو الشركة." : activeTool === "rc-missing" ? "قارن غرف تقرير RES_DETAIL مع أرقام الغرف الموجودة في أسماء ملفات PDF، واعرض الغرف التي لا يوجد لها PDF." : activeTool === "rc-preview" ? "ابحث عن بطاقات التسجيل حسب أرقام الغرف، واعرض صفحات PDF واطبع الصفحة المطلوبة دون تقارير وصول." : "ارفع Journal by Cashier and Transaction Code لاستخراج الحركات، أو RES_DETAIL لاستخراج غرف الوصول التي لديها 1012 Fixed Charges."}</p>
       </header>
+
+      <section className="panel" aria-live="polite" style={{ padding: "12px 16px", marginBottom: 16 }}>
+        <strong>مكتبة الملفات المشتركة</strong>
+        <div className="uploads" style={{ marginTop: 8, alignItems: "center" }}>
+          <span>الحجوزات: {sharedReservations.loading ? "جارٍ الفحص..." : sharedReservations.path ? sharedReservations.entries.length + " ملف" : "غير مرتبط"}</span>
+          <span>نماذج التسجيل: {sharedRegistrations.loading ? "جارٍ الفحص..." : sharedRegistrations.path ? sharedRegistrations.entries.length + " ملف" : "غير مرتبط"}</span>
+          <button type="button" className="add-button" disabled={sharedReservations.loading || sharedRegistrations.loading} onClick={() => { void Promise.all([refreshSharedFolder("reservations"), refreshSharedFolder("registration")]); }}>تحديث فهرس المجلدين</button>
+        </div>
+        {(sharedReservations.error || sharedRegistrations.error) && <p className="saved-hint">{[sharedReservations.error, sharedRegistrations.error].filter(Boolean).join(" — ")}</p>}
+        <p className="saved-hint">يتم فحص المجلدين بالتوازي عند بدء التطبيق. يمكن للأدوات استخدام الملفات المشتركة مباشرة من المجلد الأصلي، وتُقرأ محتويات الملفات عند الحاجة دون رفعها مجددًا.</p>
+      </section>
 
       <section className="panel tool-picker">
         <label htmlFor="tool-select">اختر الأداة</label>
         <select id="tool-select" value={activeTool} onChange={(e) => {
-          setActiveTool(e.target.value as "nationality" | "towels" | "nationality-missing" | "missing-profile" | "manager-report" | "journal" | "rc-missing" | "guest-name-extractor");
+          setActiveTool(e.target.value);
         }}>
           <option value="nationality">التقرير اليومي للجنسيات</option>
           <option value="towels">Missing Towel Detector</option>
@@ -643,11 +739,15 @@ export default function Home() {
           <option value="manager-report">Manager Report</option>
           <option value="journal">Journal Detector</option>
           <option value="rc-missing">RC Missing</option>
+          <option value="rc-preview">RC Preview</option>
           <option value="guest-name-extractor">فتح Guest Name Extractor</option>
         </select>
       </section>
 
-      {activeTool === "guest-name-extractor" ? <GuestNameExtractorPage /> : activeTool === "nationality" ? (
+      <div style={{ display: activeTool === "guest-name-extractor" ? "block" : "none" }}><GuestNameExtractorPage /></div>
+      {activeTool === "guest-name-extractor" ? null : activeTool === "rc-preview" ? (
+        <RCPreview />
+      ) : activeTool === "nationality" ? (
         <>
       <section className="panel">
         <h2>إدارة البيانات والإعدادات</h2>
@@ -1001,18 +1101,20 @@ export default function Home() {
       ) : activeTool === "rc-missing" ? (
         <section className="panel">
           <h2>RC Missing</h2>
-          <p className="muted">ارفع تقرير الوصول RES_DETAIL.xml وحدد ملفات PDF مباشرة (يمكن تحديد عدة ملفات دفعة واحدة). تستخرج الأداة أرقام الغرف المكونة من 3 أو 4 خانات من أسماء ملفات PDF، وتحول الرقم الثلاثي إلى أربعة أرقام بإضافة صفر في البداية، ثم تعرض غرف تقرير الوصول التي لا يوجد لها ملف PDF.</p>
+          <p className="muted">ارفع تقرير الوصول RES_DETAIL.xml أو arr.pdf. ستقرأ الأداة ملفات PDF مباشرة من آخر مجلد حجوزات مرتبط في Guest Name Extractor، بما في ذلك المجلدات الداخلية، ويمكنك أيضًا اختيار ملفات PDF يدويًا عند الحاجة. تستخرج أرقام الغرف من أسماء الملفات وتحول الرقم الثلاثي إلى أربعة أرقام بإضافة صفر في البداية.</p>
           <div className="upload">
-            <label htmlFor="rc-res-file">تقرير الوصول — RES_DETAIL.xml</label>
-            <input id="rc-res-file" type="file" accept=".xml,text/xml,application/xml" onChange={(e) => { setRcResFile(e.target.files?.[0] ?? null); setRcMissingRooms([]); setRcSummary(null); setRcMessage(""); }} />
+            <label htmlFor="rc-res-file">تقرير الوصول — RES_DETAIL.xml أو arr.pdf</label>
+            <input id="rc-res-file" type="file" accept=".xml,.pdf,text/xml,application/xml,application/pdf" onChange={(e) => { setRcResFile(e.target.files?.[0] ?? null); setRcMissingRooms([]); setRcSummary(null); setRcMessage(""); }} />
             {rcResFile && <div className="filename">تم الاختيار: {rcResFile.name}</div>}
           </div>
           <div className="upload">
-            <label htmlFor="rc-pdf-files">ملفات PDF (يمكن تحديد عدة ملفات معًا)</label>
+            <label htmlFor="rc-pdf-files">ملفات PDF إضافية (اختياري — يمكن تحديد عدة ملفات)</label>
             <input id="rc-pdf-files" type="file" accept=".pdf,application/pdf" multiple onChange={(e) => { setRcPdfFiles(Array.from(e.target.files || [])); setRcMissingRooms([]); setRcSummary(null); setRcMessage(""); }} />
-            {rcPdfFiles.length > 0 && <div className="filename">تم اختيار {rcPdfFiles.length} ملف PDF</div>}
+            {rcPdfFiles.length > 0 && <div className="filename">تم اختيار {rcPdfFiles.length} ملف PDF إضافي</div>}
+            {rcFolderPath && <div className="filename" dir="ltr">مجلد الحجوزات المرتبط: {rcFolderPath}</div>}
+            {!rcFolderPath && <div className="saved-hint">لم يتم العثور على مجلد محفوظ من Guest Name Extractor. يمكنك ربط مجلد من هناك أولًا أو اختيار ملفات PDF يدويًا.</div>}
           </div>
-          <button className="button" onClick={detectRCMissing} disabled={rcBusy || !rcResFile || !rcPdfFiles.length}>{rcBusy ? "جارٍ الفحص..." : "فحص الغرف الناقصة"}</button>
+          <button className="button" onClick={detectRCMissing} disabled={rcBusy || !rcResFile}>{rcBusy ? "جارٍ الفحص..." : "فحص الغرف الناقصة"}</button>
           {rcMessage && <div role="status" className="notice">{rcMessage}</div>}
           {rcSummary && (
             <div className="towel-results">
