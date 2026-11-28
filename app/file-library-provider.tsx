@@ -34,6 +34,8 @@ const FileLibraryContext = createContext<FileLibraryContextValue | null>(null);
 export function FileLibraryProvider({ children }: { children: ReactNode }) {
   const [reservations, setReservations] = useState<FolderState>(emptyFolder);
   const [registrations, setRegistrations] = useState<FolderState>(emptyFolder);
+  const folderStateRef = useRef({ reservations, registrations });
+  useEffect(() => { folderStateRef.current = { reservations, registrations }; }, [reservations, registrations]);
   const browserFiles = useRef(new Map<string, File>());
   const byteCache = useRef(new Map<string, Uint8Array>());
   const cachedBytes = useRef(0);
@@ -60,7 +62,7 @@ export function FileLibraryProvider({ children }: { children: ReactNode }) {
 
   const refreshFolder = useCallback(async (kind: SharedFolderKind, requestedPath?: string) => {
     if (!window.desktopBridge) {
-      const current = kind === "reservations" ? reservations : registrations;
+      const current = kind === "reservations" ? folderStateRef.current.reservations : folderStateRef.current.registrations;
       if (requestedPath || !current.loaded) {
         updateFolder(kind, value => ({ ...value, loading: false, loaded: true, error: current.entries.length ? "" : "اختر مجلدًا أو ملفات من جهازك لبدء الفهرسة." }));
       }
@@ -86,7 +88,7 @@ export function FileLibraryProvider({ children }: { children: ReactNode }) {
     } finally {
       updateFolder(kind, current => ({ ...current, loading: false }));
     }
-  }, [updateFolder, reservations, registrations]);
+  }, [updateFolder]);
 
   const setFolderPath = useCallback(async (kind: SharedFolderKind, rootPath: string) => {
     if (!window.desktopBridge) throw new Error("في المتصفح اختر المجلد من زر اختيار الملفات بدلًا من إدخال مسار Windows.");
