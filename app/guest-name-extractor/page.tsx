@@ -1988,6 +1988,7 @@ export default function GuestNameExtractorPage() {
   const nativeScanInProgressRef = useRef(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
+  const previewSectionRef = useRef<HTMLElement>(null);
   useEffect(() => { setIsDesktop(Boolean(window.desktopBridge)); }, []);
 
   useEffect(() => {
@@ -2350,6 +2351,7 @@ export default function GuestNameExtractorPage() {
     setMsgPreview(null);
     setMsgPreviewError("");
     setActiveAttachment(null);
+    window.setTimeout(() => previewSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
     if (item.extension.toLowerCase() !== "msg") return;
     void (async () => {
       try {
@@ -3273,7 +3275,7 @@ export default function GuestNameExtractorPage() {
         </div>
       </section>}
 
-      {selected && <section className="panel" aria-label="معاينة المستند">
+      {selected && <section ref={previewSectionRef} className="panel" aria-label="معاينة المستند" style={{ scrollMarginTop: 20 }}>
         <div className="section-heading">
           <div><h2>4. معاينة المستند واستخراج البيانات</h2>
             <p className="muted">{selected.name} · {selected.company}</p></div>
@@ -3284,7 +3286,7 @@ export default function GuestNameExtractorPage() {
               <button type="button" className="add-button" onClick={printVoucher} disabled={!msgPreview?.attachments.some((attachment) => attachment.type === "application/pdf" || attachment.name.toLowerCase().endsWith(".pdf"))}>طباعة الفاوتشر</button>
             </> : selected.extension === "pdf" ? <button type="button" className="add-button" onClick={printVoucher}>طباعة الفاوتشر</button> : null}
             <button type="button" className="add-button" onClick={() => void copyPageDiagnostics()}>نسخ بيانات الصفحة للتشخيص</button>
-            <button type="button" className="add-button" onClick={() => setSelected(null)}>إغلاق المعاينة</button>
+            <button type="button" className="add-button" onClick={() => { setSelected(null); window.scrollTo({ top: 0, behavior: "smooth" }); }}>إغلاق المعاينة</button>
           </div>
         </div>
         {selected.extension === "pdf" && <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "12px 0" }}>
