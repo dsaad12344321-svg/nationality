@@ -270,10 +270,11 @@ export default function RCPreview() {
       </div>
       <div className="upload" style={{ marginTop: 12 }}>
         <label>مجلد نماذج التسجيل PDF</label>
-        <button type="button" className="add-button" onClick={chooseFolder}>اختيار / تغيير مجلد النماذج</button>\n        {(typeof window === "undefined" || !window.desktopBridge) && <><input ref={folderInputRef} type="file" accept=".pdf,application/pdf" multiple onChange={(event) => { const files = Array.from(event.target.files || []); if (files.length) { setFolderFiles("registration", files); setResults([]); setSelected(null); setPdfData(null); setMessage("تم تحميل " + files.length + " ملفًا من المتصفح. ستظل الملفات متاحة خلال جلسة الصفحة الحالية."); } event.target.value = ""; }} style={{ display: "none" }} /><label className="saved-hint">في المتصفح حدد ملفات Registration Card PDF من جهازك (يمكن تحديد عدة ملفات).</label></>}
+        <button type="button" className="add-button" onClick={chooseFolder}>اختيار / تغيير مجلد النماذج</button>
+        {(typeof window === "undefined" || !window.desktopBridge) && <><input ref={folderInputRef} type="file" accept=".pdf,application/pdf" multiple onChange={(event) => { const files = Array.from(event.target.files || []); if (files.length) { setFolderFiles("registration", files); setResults([]); setSelected(null); setPdfData(null); setMessage("تم تحميل " + files.length + " ملفًا من المتصفح. ستظل الملفات متاحة خلال جلسة الصفحة الحالية."); } event.target.value = ""; }} style={{ display: "none" }} /><label className="saved-hint">في المتصفح حدد ملفات Registration Card PDF من جهازك (يمكن تحديد عدة ملفات).</label></>}
         <p className="saved-hint">{registrations.path ? registrations.path : "لم يتم ربط مجلد نماذج التسجيل بعد."}</p>
         <p className="saved-hint">{registrations.loading ? "جارٍ فهرسة الملفات..." : "ملفات PDF في الفهرس: " + pdfEntries.length}</p>
-        <button type="button" className="add-button" disabled={registrations.loading || !registrations.path || !window.desktopBridge} onClick={() => void refreshFolder("registration").then(() => setMessage("تم تحديث فهرس ملفات PDF.")).catch(() => setMessage("تعذر تحديث الفهرس."))}>تحديث الفهرس</button>
+        <button type="button" className="add-button" disabled={registrations.loading || !registrations.path || typeof window === "undefined" || !window.desktopBridge} onClick={() => void refreshFolder("registration").then(() => setMessage("تم تحديث فهرس ملفات PDF.")).catch(() => setMessage("تعذر تحديث الفهرس."))}>تحديث الفهرس</button>
       </div>
       <div className="uploads" style={{ marginTop: 16 }}>
         <label style={{ display: "grid", gap: 8, fontWeight: 700 }}>
