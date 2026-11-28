@@ -1,0 +1,311 @@
+{
+  "version": 1,
+  "description": "قواعد تعريف صيغ الفاوتشرات وربطها بمحلل البيانات الحالي. كود الاستخراج التنفيذي موجود في app/guest-name-extractor/page.tsx؛ هذا الملف يحتوي توقيعات الشركات ومعرفات الحجوزات وحقول النزلاء، ويمكن تحديثه دون إنشاء قاعدة بيانات.",
+  "searchFields": [
+    "fileName",
+    "relativePath",
+    "companyFolder",
+    "documentText",
+    "bookingReference",
+    "confirmationNumber",
+    "guestName"
+  ],
+  "rules": [
+    {
+      "id": "eagle",
+      "company": "Eagle Travel",
+      "aliases": [
+        "Eagle",
+        "Eagle Travel"
+      ],
+      "parser": "eagle",
+      "signatures": [
+        "\\bNames\\b[\\s\\S]{0,200}\\bAge\\b[\\s\\S]{0,100}\\bACC\\b",
+        "eagletvl\\.com"
+      ],
+      "bookingIdentifiers": [
+        "booking reference",
+        "confirmation number"
+      ],
+      "guestFields": [
+        "name",
+        "dateOfBirth"
+      ]
+    },
+    {
+      "id": "alltours",
+      "company": "AllTours",
+      "aliases": [
+        "AllTours",
+        "All Tours"
+      ],
+      "parser": "alltours",
+      "signatures": [
+        "\\bHOTEL\\s+RESERVATION\\s+FORM\\b",
+        "\\bSURNAME,\\s*NAME\\b",
+        "\\bVOUCHER\\s+NR\\b"
+      ],
+      "bookingIdentifiers": [
+        "voucher number"
+      ],
+      "guestFields": [
+        "name"
+      ]
+    },
+    {
+      "id": "biblio-globus",
+      "company": "Biblio Globus",
+      "aliases": [
+        "Biblio Globus",
+        "Biblo Globus"
+      ],
+      "parser": "biblio",
+      "signatures": [
+        "(?:Biblio|Biblo)\\s+Globus",
+        "\\bRef\\s*#",
+        "\\bDate\\s+of\\s+birth\\b"
+      ],
+      "bookingIdentifiers": [
+        "Ref number"
+      ],
+      "guestFields": [
+        "name",
+        "dateOfBirth"
+      ]
+    },
+    {
+      "id": "easyjet",
+      "company": "EasyJet",
+      "aliases": [
+        "EasyJet",
+        "Easy Jet"
+      ],
+      "parser": "easyjet",
+      "signatures": [
+        "\\bNames\\s*:\\s*Age\\b",
+        "\\bRoom\\s+Taken\\s+from\\s+Allocation\\b"
+      ],
+      "bookingIdentifiers": [
+        "booking reference"
+      ],
+      "guestFields": [
+        "name"
+      ]
+    },
+    {
+      "id": "red-sea",
+      "company": "Red Sea Tours",
+      "aliases": [
+        "Red Sea",
+        "Red Sea Tours"
+      ],
+      "parser": "red-sea",
+      "signatures": [
+        "redseatours-eg\\.com"
+      ],
+      "bookingIdentifiers": [
+        "reservation number"
+      ],
+      "guestFields": [
+        "name"
+      ]
+    },
+    {
+      "id": "w2m",
+      "company": "W2M",
+      "aliases": [
+        "W2M",
+        "World 2 Meet"
+      ],
+      "parser": "w2m",
+      "signatures": [
+        "\\bBooking\\s+Code\\b",
+        "\\bPassenger\\s+Name\\b",
+        "\\bPassenger\\s+Last\\s+Name\\b",
+        "\\bWorld\\s+2\\s+Meet\\b"
+      ],
+      "bookingIdentifiers": [
+        "Booking Code"
+      ],
+      "guestFields": [
+        "name"
+      ]
+    },
+    {
+      "id": "tui",
+      "company": "TUI Destimo",
+      "aliases": [
+        "TUI",
+        "TUI Destimo"
+      ],
+      "parser": "tui",
+      "signatures": [
+        "\\bTUI\\s+Ref\\s*:",
+        "\\bSuper\\s+PNR\\s*:",
+        "\\bRoom\\s+types\\s*/",
+        "\\bName\\s+Age\\s+Arrival\\s+Departure\\b"
+      ],
+      "bookingIdentifiers": [
+        "TUI Ref",
+        "Super PNR"
+      ],
+      "guestFields": [
+        "name"
+      ]
+    },
+    {
+      "id": "tez",
+      "company": "Tez Tour",
+      "aliases": [
+        "Tez",
+        "Tez Tour"
+      ],
+      "parser": "tez",
+      "signatures": [
+        "\\bNEW\\s+RESERVATION\\b",
+        "\\bVoucher\\s+No\\b",
+        "\\bGuest\\s+Information\\b",
+        "\\bCheckin\\s+Date\\b"
+      ],
+      "bookingIdentifiers": [
+        "Voucher No"
+      ],
+      "guestFields": [
+        "name",
+        "dateOfBirth"
+      ]
+    },
+    {
+      "id": "funsun",
+      "company": "FUN&SUN",
+      "aliases": [
+        "FUN&SUN",
+        "FUN SUN",
+        "FUN AND SUN",
+        "FUN",
+        "FUN SUN&#x20;",
+        "FUN &SUN",
+        "Hotel2Sejour"
+      ],
+      "parser": "funsun",
+      "signatures": [
+        "FUN\\s*&\\s*SUN",
+        "FUN\\s+SUN",
+        "EX\\s+TUI\\s+RUSSIA",
+        "Passenger\\s+Informations",
+        "Surname,\\s*Name",
+        "Birthdate"
+      ],
+      "bookingIdentifiers": [
+        "numeric PDF filename",
+        "voucher number"
+      ],
+      "guestFields": [
+        "name",
+        "dateOfBirth"
+      ]
+    },
+    {
+      "id": "sun",
+      "company": "SUN International",
+      "aliases": [
+        "SUN",
+        "SUN International",
+        "Hotel2Sejour"
+      ],
+      "parser": "sun",
+      "signatures": [
+        "passenger\\s+informations",
+        "surname\\s*,?\\s*name",
+        "\\bbirthdate\\b",
+        "\\btitle\\b",
+        "\\bage\\b"
+      ],
+      "bookingIdentifiers": [
+        "voucher reference"
+      ],
+      "guestFields": [
+        "name",
+        "dateOfBirth"
+      ]
+    },
+    {
+      "id": "odeon",
+      "company": "Odeon",
+      "aliases": [
+        "Odeon"
+      ],
+      "parser": "odeon",
+      "signatures": [
+        "\\b(?:voucher\\s*no|operator\\s+voucher\\s+no)\\b",
+        "\\btourists\\b"
+      ],
+      "bookingIdentifiers": [
+        "Voucher No",
+        "Operator Voucher No"
+      ],
+      "guestFields": [
+        "name",
+        "dateOfBirth"
+      ]
+    },
+    {
+      "id": "pegas",
+      "company": "Pegas",
+      "aliases": [
+        "Pegas",
+        "Pegas Touristik"
+      ],
+      "parser": "pegas",
+      "signatures": [
+        "\\blast\\s+name\\b",
+        "\\bfirst\\s+name\\b",
+        "\\bdate\\s+of\\s+birth\\b"
+      ],
+      "bookingIdentifiers": [
+        "voucher reference"
+      ],
+      "guestFields": [
+        "name",
+        "dateOfBirth"
+      ]
+    },
+    {
+      "id": "anex",
+      "company": "Anex",
+      "aliases": [
+        "Anex",
+        "Anex Tour"
+      ],
+      "parser": "anex",
+      "signatures": [
+        "\\bclients\\s*names\\s*,?\\s*citizenship\\b",
+        "\\bdate\\s+of\\s+born\\b"
+      ],
+      "bookingIdentifiers": [
+        "Res.No"
+      ],
+      "guestFields": [
+        "name",
+        "dateOfBirth"
+      ]
+    },
+    {
+      "id": "mts",
+      "company": "MTS",
+      "aliases": [
+        "MTS"
+      ],
+      "parser": "generic",
+      "signatures": [],
+      "bookingIdentifiers": [
+        "booking number",
+        "confirmation number"
+      ],
+      "guestFields": [
+        "name",
+        "dateOfBirth"
+      ]
+    }
+  ]
+}
